@@ -127,6 +127,9 @@ async fn delete_event(
 async fn demo_reset(State(s): State<AppState>, _m: Member) -> StatusCode {
     if let Some(demo) = &s.demo {
         demo.reset();
+        if let Err(e) = s.type_admin.reset().await {
+            tracing::error!(error = %e, "cannot reset the demo type catalog");
+        }
     }
     StatusCode::NO_CONTENT
 }

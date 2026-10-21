@@ -6,7 +6,8 @@
 // is computed here, from the grid area left under the header and above the footer.
 import { byId, h, swatch } from "./dom";
 import { fmtDayMonthYear } from "./dates";
-import { LEGEND_CATS, state, today, typeLabelPlural, type Cat } from "./state";
+import { t } from "./i18n";
+import { legendCats, state, today, typeLabelPlural, type Cat } from "./state";
 
 type Paper = "a3" | "a4";
 /** Printable area (page minus 10 mm margins) and fixed header/footer heights, all in mm. */
@@ -19,7 +20,7 @@ let paper: Paper = "a3";
 
 function buildPrintHeader(): void {
   byId("printYear").textContent = String(state.year);
-  const cats: Cat[] = [...LEGEND_CATS, ...(state.events.some((e) => e.cat === "unclassified") ? (["unclassified"] as Cat[]) : [])];
+  const cats: Cat[] = [...legendCats(), ...(state.events.some((e) => e.cat === "unclassified") ? (["unclassified"] as Cat[]) : [])];
   const legend = byId("printLegend");
   const chips = cats
     .filter((c) => !state.hidden.has(c))
@@ -29,17 +30,17 @@ function buildPrintHeader(): void {
       return chip;
     });
   const both = h("span", "chip");
-  both.append(swatch("both"), document.createTextNode("Les deux"));
+  both.append(swatch("both"), document.createTextNode(t("both.name")));
   legend.replaceChildren(...chips, both);
 
   const hidden = cats.filter((c) => state.hidden.has(c)).map((c) => typeLabelPlural(c));
   const parts: string[] = [];
-  if (hidden.length) parts.push(`sans ${hidden.join(", ")}`);
+  if (hidden.length) parts.push(t("print.without", { list: hidden.join(", ") }));
   if (state.member !== "all") parts.push(state.member);
   const line = byId("printFilters");
   line.hidden = parts.length === 0;
-  line.textContent = parts.length ? `Filtres : ${parts.join(" · ")}` : "";
-  byId("printFoot").textContent = `Imprimé le ${fmtDayMonthYear(today())}`;
+  line.textContent = parts.length ? t("print.filters", { list: parts.join(" · ") }) : "";
+  byId("printFoot").textContent = t("print.printedOn", { date: fmtDayMonthYear(today()) });
 }
 
 /** Sets the page format and the cell size for the print layout. Idempotent. */

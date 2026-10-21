@@ -16,13 +16,16 @@ import {
   type Token,
 } from "./api";
 import { copyText } from "./clipboard";
+import { applyTypeColors } from "./colors";
 import { byId, h } from "./dom";
 import { fmtDateTime } from "./fmt";
+import { adoptLang, applyStatic, mountLangSwitch, t } from "./i18n";
+import { initTypesEditor } from "./types-editor";
 
 let tz = "Europe/Paris";
 
 const errText = (e: unknown): string =>
-  e instanceof ApiError ? e.message : "Une erreur est survenue. Réessayez dans un instant.";
+  e instanceof ApiError ? e.message : t("err.generic");
 
 function showError(id: string, e: unknown | null): void {
   const el = byId(id);
@@ -34,14 +37,14 @@ function showError(id: string, e: unknown | null): void {
 
 function table(label: string, headers: string[], rows: Node[][], empty: string): HTMLElement {
   if (rows.length === 0) return h("p", "muted", empty);
-  const t = h("table", "tbl");
-  t.setAttribute("aria-label", label);
+  const tbl = h("table", "tbl");
+  tbl.setAttribute("aria-label", label);
   const head = h("tr");
   for (const text of headers) {
     const th = h("th");
     th.scope = "col";
     if (text) th.textContent = text;
-    else th.append(h("span", "sr", "Actions"));
+    else th.append(h("span", "sr", t("set.actions")));
     head.append(th);
   }
   const thead = h("thead");
@@ -56,17 +59,17 @@ function table(label: string, headers: string[], rows: Node[][], empty: string):
     }
     tbody.append(tr);
   }
-  t.append(thead, tbody);
-  return t;
+  tbl.append(thead, tbody);
+  return tbl;
 }
 
 const text = (s: string): Text => document.createTextNode(s);
-const when = (iso: string | null): Text => text(iso ? fmtDateTime(iso, tz) : "Jamais");
+const when = (iso: string | null): Text => text(iso ? fmtDateTime(iso, tz) : t("fmt.never"));
 
 function revokeButton(name: string, action: () => Promise<void>): HTMLButtonElement {
-  const b = h("button", "btn ghost sm", "Révoquer");
+  const b = h("button", "btn ghost sm", t("set.revoke"));
   b.type = "button";
-  b.setAttribute("aria-label", `Révoquer ${name}`);
+  b.setAttribute("aria-label", t("set.revokeAria", { name }));
   b.addEventListener("click", () => confirmRevoke(name, action));
   return b;
 }
@@ -79,14 +82,14 @@ function copyRow(label: string, value: string, cls = ""): HTMLElement {
   input.value = value;
   input.setAttribute("aria-label", label);
   input.addEventListener("focus", () => input.select());
-  const btn = h("button", "btn", "Copier");
+  const btn = h("button", "btn", t("btn.copy"));
   btn.type = "button";
   let timer = 0;
   btn.addEventListener("click", async () => {
     const ok = await copyText(input);
-    btn.textContent = ok ? "Copié" : "Copie impossible";
+    btn.textContent = ok ? t("btn.copied") : t("btn.copyFailed");
     window.clearTimeout(timer);
-    timer = window.setTimeout(() => (btn.textContent = "Copier"), 2500);
+    timer = window.setTimeout(() => (btn.textContent = t("btn.copy")), 2500);
   });
   row.append(input, btn);
   return row;
@@ -95,7 +98,7 @@ function copyRow(label: string, value: string, cls = ""): HTMLElement {
 function secretBox(label: string, value: string, warning: string): HTMLElement {
   const box = h("div", "secret");
   box.setAttribute("role", "group");
-  box.setAttribute("aria-label", "Nouveau secret");
+  box.setAttribute("aria-label", t("set.newSecret"));
   box.append(h("p", "secret-warn", warning), copyRow(label, value));
   return box;
 }
@@ -106,7 +109,7 @@ let pendingRevoke: (() => Promise<void>) | null = null;
 
 function confirmRevoke(name: string, action: () => Promise<void>): void {
   pendingRevoke = action;
-  byId("confirmText").textContent = `Révoquer l’accès de « ${name} » ?`;
+  byId("confirmText").textContent = t("set.revokeQ", { name });
   byId("confirmErr").textContent = "";
   (byId("confirmDlg") as HTMLDialogElement).showModal();
   byId("confirmNo").focus();
@@ -135,26 +138,31 @@ function initConfirm(): void {
 
 // ---------- tokens ----------
 
-const SCOPE_LABEL: Record<Scope, string> = { read: "Lecture seule", read_write: "Lecture et écriture" };
+const scopeLabel = (s: Scope): string => t(s === "read" ? "set.tokens.read" : "set.tokens.readWrite");
 
 function renderTokens(tokens: Token[]): void {
-  const rows = tokens.map((t) => {
+  const rows = tokens.map((tk) => {
     const name = h("span", "tname");
-    name.append(text(t.name));
-    if (t.kiosk) name.append(h("span", "badge", "Kiosque"));
+    name.append(text(tk.name));
+    if (tk.kiosk) name.append(h("span", "badge", t("set.kioskBadge")));
     return [
       name,
-      text(SCOPE_LABEL[t.scope] ?? t.scope),
-      when(t.created_at),
-      when(t.last_used_at),
-      revokeButton(t.name, async () => {
-        await revokeToken(t.id);
+      text(scopeLabel(tk.scope)),
+      when(tk.created_at),
+      when(tk.last_used_at),
+      revokeButton(tk.name, async () => {
+        await revokeToken(tk.id);
         await reloadTokens();
       }),
     ];
   });
   byId("tokens").replaceChildren(
-    table("Jetons personnels", ["Nom", "Droits", "Créé le", "Dernière utilisation", ""], rows, "Aucun jeton pour l’instant."),
+    table(
+      t("set.tokens.table"),
+      [t("set.tokens.name"), t("set.tokens.rights"), t("set.tokens.created"), t("set.tokens.lastUsed"), ""],
+      rows,
+      t("set.tokens.empty"),
+    ),
   );
 }
 
@@ -169,7 +177,7 @@ function initTokenForm(): void {
     ev.preventDefault();
     const name = input.value.trim();
     if (!name) {
-      showError("tokenErr", new ApiError(400, "validation_failed", "Donnez un nom au jeton."));
+      showError("tokenErr", new ApiError(400, "validation_failed", t("set.tokens.nameRequired")));
       input.focus();
       return;
     }
@@ -180,7 +188,7 @@ function initTokenForm(): void {
     try {
       const created = await createToken({ name, scope });
       byId("newToken").replaceChildren(
-        secretBox("Jeton", created.token, "Copiez ce jeton maintenant : il ne sera plus affiché."),
+        secretBox(t("set.tokens.secretLabel"), created.token, t("set.tokens.once")),
       );
       input.value = "";
       await reloadTokens();
@@ -201,7 +209,7 @@ function initKiosk(): void {
       const created = await createToken({ name: "", kiosk: true });
       const url = created.kiosk_url ?? "";
       byId("newKiosk").replaceChildren(
-        secretBox("Lien kiosque", url, "Copiez ce lien maintenant : il ne sera plus affiché."),
+        secretBox(t("set.kiosk.label"), url, t("set.kiosk.once")),
       );
       await reloadTokens();
     } catch (e) {
@@ -226,7 +234,12 @@ function renderGrants(grants: Grant[]): void {
     }),
   ]);
   byId("grants").replaceChildren(
-    table("Connexions OAuth", ["Application", "Redirection", "Autorisé le", "Dernière utilisation", ""], rows, "Aucune application connectée."),
+    table(
+      t("set.grants"),
+      [t("set.grants.app"), t("set.grants.redirect"), t("set.grants.authorized"), t("set.tokens.lastUsed"), ""],
+      rows,
+      t("set.grants.empty"),
+    ),
   );
 }
 
@@ -238,11 +251,12 @@ async function reloadGrants(): Promise<void> {
 
 let pollTimer = 0;
 
-const RUN_LABEL: Record<ImportRun["status"], string> = { success: "Réussi", failed: "Échec", running: "En cours" };
+const runLabel = (s: ImportRun["status"]): string =>
+  t(s === "success" ? "set.imports.success" : s === "failed" ? "set.imports.failed" : "set.imports.runningStatus");
 
 function renderRuns(runs: ImportRun[]): void {
   const rows = runs.map((r) => {
-    const status = h("span", `run-${r.status}`, RUN_LABEL[r.status] ?? r.status);
+    const status = h("span", `run-${r.status}`, runLabel(r.status));
     return [
       text(fmtDateTime(r.started_at, tz)),
       status,
@@ -255,10 +269,18 @@ function renderRuns(runs: ImportRun[]): void {
   });
   byId("runs").replaceChildren(
     table(
-      "Derniers imports",
-      ["Date", "Résultat", "Créés", "Mis à jour", "Supprimés", "Inchangés", "Erreur"],
+      t("set.imports.table"),
+      [
+        t("set.imports.date"),
+        t("set.imports.result"),
+        t("set.imports.created"),
+        t("set.imports.updated"),
+        t("set.imports.deleted"),
+        t("set.imports.unchanged"),
+        t("set.imports.error"),
+      ],
       rows,
-      "Aucun import pour l’instant.",
+      t("set.imports.none"),
     ),
   );
 }
@@ -271,9 +293,9 @@ async function refreshImports(): Promise<void> {
     renderRuns(s.runs);
     const last = s.runs[0];
     const status = byId("importStatus");
-    if (s.running) status.textContent = "Import en cours…";
-    else if (last) status.textContent = `Dernier import : ${fmtDateTime(last.started_at, tz)}.`;
-    else status.textContent = "Aucun import pour l’instant.";
+    if (s.running) status.textContent = t("set.imports.running");
+    else if (last) status.textContent = t("set.imports.last", { date: fmtDateTime(last.started_at, tz) });
+    else status.textContent = t("set.imports.none");
     (byId("importNow") as HTMLButtonElement).disabled = s.running;
     showError("importErr", null);
     if (s.running) pollTimer = window.setTimeout(() => void refreshImports(), 1000);
@@ -287,7 +309,7 @@ function initImports(): void {
   byId("importNow").addEventListener("click", async () => {
     const btn = byId("importNow") as HTMLButtonElement;
     btn.disabled = true;
-    byId("importStatus").textContent = "Import en cours…";
+    byId("importStatus").textContent = t("set.imports.running");
     showError("importErr", null);
     try {
       await startImport();
@@ -301,14 +323,19 @@ function initImports(): void {
 // ---------- boot ----------
 
 async function boot(): Promise<void> {
+  applyStatic();
+  mountLangSwitch(byId("langSwitch"));
   initConfirm();
   initTokenForm();
   initKiosk();
   initImports();
   try {
     const cfg = await getConfig();
+    adoptLang(cfg.lang);
+    applyTypeColors(cfg.types);
     tz = cfg.timezone;
-    byId("mcp").replaceChildren(copyRow("Adresse du serveur MCP", cfg.mcp_url));
+    byId("mcp").replaceChildren(copyRow(t("set.mcp"), cfg.mcp_url));
+    void initTypesEditor(errText);
     const [tokens, grants] = await Promise.all([listTokens(), listGrants()]);
     renderTokens(tokens);
     renderGrants(grants);

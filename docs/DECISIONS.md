@@ -360,3 +360,72 @@ alternatives considered.
   "Année en famille" (page titles, headings, consent page), as do the `annee` binary and `/opt/annee`.
   The MCP server name is `family-year-planner`.
 - **Alternatives:** keeping the French image name; `family-calendar` (too generic).
+
+## D30 — Type catalog stored in SQLite, edited in Réglages (V1.1)
+
+- **Context:** SPEC §19 makes type names, colors and extra types configurable.
+- **Choice:** tables `type_settings` (only types that differ from the defaults, plus every custom type) and
+  `type_migrations`; the effective catalog lives in memory (`TypeRegistry`, crate `gcal`) and is shared with the
+  calendar stores. An invalid stored catalog falls back to the defaults with an error log.
+- **Alternatives:** `[[types]]` in `config.toml` (no UI, restart needed); storing the catalog in Google Calendar
+  (no natural place for it).
+
+## D31 — Added types are slots `custom_1`…`custom_3`
+
+- **Context:** each Google `colorId` serves one type and Google has 11 colors; the 8 colored built-in types use 8.
+- **Choice:** `EventType::Custom(1..=3)`, code `custom_N`, always a Famille bar, writable, "busy". The slot is
+  independent of the color, so recoloring never changes a code. The limit of 3 follows from the colors, it is not
+  an extra rule. Deleting a custom type clears the `colorId` of its events (they become unclassified).
+- **Alternatives:** free-form slug codes (non-`Copy` type, much more churn, ugly collisions); letting a custom
+  type live in Repères or render as a tint (many edge cases: legend, print, busy days).
+
+## D32 — Language per browser, resolved by a request-scoped layer
+
+- **Choice:** cookie `annee_lang` (set by the front-end switch or `?lang=`), else `app.default_language`
+  (`fr`). `Accept-Language` is ignored on purpose ("FR par défaut"). A middleware runs each request inside a
+  `tokio` task-local, so error messages, the consent page and imported titles call `i18n::current()` without
+  threading a parameter. MCP requests carry no cookie and therefore use the instance default.
+- **Alternatives:** an `Accept-Language` negotiation; passing `Lang` through every function.
+
+## D33 — Imported titles are translated at read time
+
+- **Choice:** imported events keep the French title in Google Calendar; a fixed table maps the French titles
+  of public holidays and of the usual school holidays to English when the request language is English. Unknown
+  titles (new dataset descriptions) are shown as stored. SPEC §19.2 says "by key"; matching the stored title is
+  equivalent because titles are normalized by the importer.
+- **Alternatives:** storing both languages in the event (breaks idempotent upserts); a translation per `fy_source_id`.
+
+## D34 — Color migration: one pass, resumable, writes blocked meanwhile
+
+- **Choice:** the whole target catalog is validated first (so swaps are legal), then a single pass over the
+  series masters of both calendars rewrites `colorId` by an `old → new` map, tagging each event with
+  `fy_migration=<id>`. The migration row is stored before the pass; a failed or interrupted pass keeps
+  writes blocked, is retried 3 times, resumed at startup and through `POST /api/admin/types/resume`.
+  The in-memory catalog switches only when the pass completes. Imports are skipped while it runs.
+- **Alternatives:** blocking recoloring when events exist; recoloring one type at a time (no swaps).
+- **Limit:** reads during the pass use the old catalog, so already-recolored events can appear unclassified
+  for a few seconds.
+
+## D35 — Palette: one CSS entry per Google color
+
+- **Choice:** `--p<colorId>-bar` / `--p<colorId>-tint` (light, dark, print) in `styles.css`; the front-end only
+  points each type at the entry of its color (`colors.ts`), so themes and the always-light print need no logic.
+  Ids 2, 3, 4, 5, 9, 10, 11 reproduce the prototype colors (visual diff unchanged); 1, 6, 7, 8 are new.
+  The "both closed" orange, the public-holiday rendering and `unclassified` grey are fixed whatever the colors.
+- **Alternatives:** generating a stylesheet from JS (blocked by the CSP); per-type hex sent by the server.
+
+## D36 — MCP follows the catalog
+
+- **Choice:** tool schemas list the codes of the current catalog (`custom_N` included) and `get_context` returns
+  `label`, `labels {fr,en}`, `color_id`, `custom`. Tool descriptions stay English.
+
+## D37 — Demo mode
+
+- **Choice:** the demo store keeps types, not colors; a catalog change re-derives types from the target catalog.
+  "Reset the demo" also restores the default catalog, so e2e tests stay independent.
+
+## D38 — Verification notes
+
+- The 11 Google event colors and their names come from SPEC §4.2 / the Calendar API `colors` resource; the
+  documentation site was not reachable from the build sandbox (`getaddrinfo ENOTFOUND`), so the names were not
+  re-checked live. `PW_CHROMIUM` lets Playwright use a Chromium whose version differs from the installed one.

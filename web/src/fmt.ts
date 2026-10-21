@@ -1,7 +1,8 @@
 // Date and time formatting in the household's time zone.
+import { locale, t } from "./i18n";
 
 function parts(d: Date, tz: string, opts: Intl.DateTimeFormatOptions): (type: string) => string {
-  const ps = new Intl.DateTimeFormat("fr-FR", { timeZone: tz, hourCycle: "h23", ...opts }).formatToParts(d);
+  const ps = new Intl.DateTimeFormat(locale(), { timeZone: tz, hourCycle: "h23", ...opts }).formatToParts(d);
   return (t) => ps.find((p) => p.type === t)?.value ?? "";
 }
 
@@ -10,7 +11,7 @@ export function fmtDateTime(iso: string, tz: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const g = parts(d, tz, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  return `${g("day")} ${g("month")} ${g("year")} à ${g("hour")}:${g("minute")}`;
+  return `${g("day")} ${g("month")} ${g("year")} ${t("fmt.at")} ${g("hour")}:${g("minute")}`;
 }
 
 /** "14:32" in `tz`. */

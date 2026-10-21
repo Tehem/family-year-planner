@@ -5,6 +5,7 @@ import { openCreate, openEdit } from "./dialog";
 import { byId, h, swatch } from "./dom";
 import { hideTip } from "./tooltip";
 import { cap, fmtLong, fmtRange, span } from "./dates";
+import { t } from "./i18n";
 import { findEvent, members, state, typeLabel, type AppEvent } from "./state";
 
 let lastFocus: Element | null = null;
@@ -57,9 +58,9 @@ export function openDay(d: string, readOnly = false): void {
       ul.append(li);
     }
     nodes.push(ul);
-  } else nodes.push(h("p", "nothing", "Rien de prévu ce jour-là."));
+  } else nodes.push(h("p", "nothing", t("day.nothing")));
   if (!readOnly) {
-    const add = h("button", "btn", "Ajouter un événement ce jour-là");
+    const add = h("button", "btn", t("day.add"));
     add.type = "button";
     add.dataset["add"] = d;
     nodes.push(add);
@@ -69,7 +70,7 @@ export function openDay(d: string, readOnly = false): void {
 
 function titleWithAge(e: AppEvent): string {
   if (e.cat !== "birthday" || e.age === null) return e.title;
-  return `${e.title} (${e.age} ${e.age > 1 ? "ans" : "an"})`;
+  return `${e.title} (${t(e.age > 1 ? "age.many" : "age.one", { n: e.age })})`;
 }
 
 function metaRow(dl: HTMLElement, term: string, value: string | Node, cls?: string): void {
@@ -83,37 +84,37 @@ export function openEvent(id: string, confirming = false): void {
   if (!e) return;
   const n = span(e.start, e.end);
   const nodes: Node[] = [heading(titleWithAge(e)), h("p", "sub", cap(fmtRange(e.start, e.end)))];
-  if (e.start_time) nodes.push(h("p", "sub time", e.end_time ? `De ${e.start_time} à ${e.end_time}` : `À ${e.start_time}`));
+  if (e.start_time) nodes.push(h("p", "sub time", e.end_time ? t("time.range", { a: e.start_time, b: e.end_time }) : t("time.at", { a: e.start_time })));
 
   const dl = h("dl", "meta");
   const catDd = h("dd", "cat");
   catDd.append(swatch(e.cat), document.createTextNode(typeLabel(e.type)));
-  dl.append(h("dt", undefined, "Catégorie"), catDd);
-  metaRow(dl, "Durée", `${n} ${n > 1 ? "jours" : "jour"}`);
+  dl.append(h("dt", undefined, t("meta.cat")), catDd);
+  metaRow(dl, t("meta.duration"), t(n > 1 ? "meta.days" : "meta.day", { n }));
   const all = e.members.length === 0 || e.members.length === members().length;
-  metaRow(dl, "Qui", all ? "Toute la famille" : e.members.join(", "));
-  if (e.location) metaRow(dl, "Lieu", e.location);
-  if (e.notes) metaRow(dl, "Notes", e.notes, "notes");
-  if (e.created_by) metaRow(dl, "Ajouté par", e.created_by);
-  if (e.updated_by && e.updated_by !== e.created_by) metaRow(dl, "Modifié par", e.updated_by);
+  metaRow(dl, t("meta.who"), all ? t("meta.everyone") : e.members.join(", "));
+  if (e.location) metaRow(dl, t("meta.loc"), e.location);
+  if (e.notes) metaRow(dl, t("meta.notes"), e.notes, "notes");
+  if (e.created_by) metaRow(dl, t("meta.addedBy"), e.created_by);
+  if (e.updated_by && e.updated_by !== e.created_by) metaRow(dl, t("meta.modifiedBy"), e.updated_by);
   nodes.push(dl);
 
   if (e.google_url) {
-    const a = h("a", "link", "Ouvrir dans Google Agenda");
+    const a = h("a", "link", t("link.gcal"));
     a.href = e.google_url;
     a.target = "_blank";
     a.rel = "noopener";
     nodes.push(a);
   }
 
-  if (e.read_only) nodes.push(h("p", "imported", "Importé automatiquement"));
+  if (e.read_only) nodes.push(h("p", "imported", t("ev.imported")));
   else if (confirming) nodes.push(confirmBox(e));
   else {
     const row = h("div", "btns");
-    const edit = h("button", "btn", "Modifier");
+    const edit = h("button", "btn", t("ev.edit"));
     edit.type = "button";
     edit.addEventListener("click", () => openEdit(e));
-    const del = h("button", "btn danger", "Supprimer");
+    const del = h("button", "btn danger", t("ev.delete"));
     del.type = "button";
     del.addEventListener("click", () => openEvent(e.id, true));
     row.append(edit, del);
@@ -126,14 +127,14 @@ export function openEvent(id: string, confirming = false): void {
 function confirmBox(e: AppEvent): HTMLElement {
   const box = h("div", "confirm");
   box.setAttribute("role", "group");
-  box.setAttribute("aria-label", "Confirmer la suppression");
-  box.append(h("p", undefined, `Supprimer « ${e.title} » ?`));
-  if (e.series_id) box.append(h("p", undefined, "Cet événement se répète chaque année : toutes les occurrences seront supprimées."));
+  box.setAttribute("aria-label", t("confirm.aria"));
+  box.append(h("p", undefined, t("confirm.q", { title: e.title })));
+  if (e.series_id) box.append(h("p", undefined, t("confirm.series")));
   const err = h("p", "err");
   err.setAttribute("role", "alert");
-  const ok = h("button", "btn danger", "Supprimer");
+  const ok = h("button", "btn danger", t("ev.delete"));
   ok.type = "button";
-  const no = h("button", "btn ghost", "Annuler");
+  const no = h("button", "btn ghost", t("btn.cancel"));
   no.type = "button";
   no.addEventListener("click", () => openEvent(e.id));
   ok.addEventListener("click", async () => {
@@ -145,7 +146,7 @@ function confirmBox(e: AppEvent): HTMLElement {
       closePanel();
       await loadYear();
     } catch (ex) {
-      err.textContent = ex instanceof ApiError ? ex.message : "Une erreur est survenue.";
+      err.textContent = ex instanceof ApiError ? ex.message : t("err.short");
       ok.disabled = false;
       no.disabled = false;
     }

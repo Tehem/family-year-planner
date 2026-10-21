@@ -25,11 +25,21 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    {
+      name: "setup",
+      testMatch: /auth\.setup\.ts/,
+      use: process.env["PW_CHROMIUM"] ? { launchOptions: { executablePath: process.env["PW_CHROMIUM"] } } : {},
+    },
     {
       name: "chromium",
       testIgnore: /auth\.setup\.ts/,
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 860 }, storageState: "playwright/.auth/state.json" },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 860 },
+        storageState: "playwright/.auth/state.json",
+        // PW_CHROMIUM: a Chromium binary that does not match the installed Playwright version.
+        ...(process.env["PW_CHROMIUM"] ? { launchOptions: { executablePath: process.env["PW_CHROMIUM"] } } : {}),
+      },
       dependencies: ["setup"],
     },
   ],

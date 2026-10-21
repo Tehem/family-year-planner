@@ -115,6 +115,9 @@ firewall (Caddy needs both to obtain the HTTPS certificate).
    - `base_url = "https://famille.example.org"`
    - `allowed_emails` = Alex's and Camille's Google emails
    - `[app.user_names]` = email → first name for both
+   - `default_language = "fr"` (or `"en"`): the language of visitors who have not picked one; the
+     `FR | EN` switch overrides it per browser. A kiosk tablet follows it too, or open the kiosk link
+     with `&lang=en` once.
    - `members = ["Alex", "Camille", "Sacha", "Noé"]`
    - `reperes_id` and `famille_id` = the two calendar IDs from step 1
    - `school_zone = "Zone B"`, `school_location = "Rennes"`
@@ -279,11 +282,24 @@ You can revoke any token or OAuth connection at any time in **Réglages**.
 3. Lock the tablet on that page: on Android, a kiosk browser app or screen pinning; on iPad,
    Guided Access (Settings → Accessibility). Keep the tablet plugged in.
 
+## Categories and colors
+
+Réglages → **Catégories** renames the categories (French and English) and chooses the Google
+Calendar event color of each one; up to three categories of your own can be added (Google only has
+11 event colors, the built-in categories use 8). Nothing to configure by hand. Good to know:
+
+- Changing a color rewrites the color of the existing events in both Google calendars (the app asks
+  first and shows how many events are concerned). Do not edit events in Google Calendar while this
+  runs (a few seconds, longer with thousands of events).
+- If it fails half way (Google unreachable), editing is suspended and Réglages shows a **Reprendre**
+  button; the server also resumes it at startup.
+- The category list is stored in `data/annee.db` (backed up with it), not in `config.toml`.
+
 ## Updates, backups, secrets
 
 - **Update:** `cd /opt/annee && docker compose pull && docker compose up -d`.
 - **Backup:** `/opt/annee/config`, `/opt/annee/secrets`, `.env` and `/opt/annee/data/annee.db`
-  (tokens and import history). All calendar data lives in Google Calendar.
+  (tokens, import history, category names and colors). All calendar data lives in Google Calendar.
 - **Rotate secrets:** changing `SESSION_KEY` logs everyone out (kiosk included); changing
   `OAUTH_SIGNING_KEY` forces agents to refresh their tokens; a new service account key requires
   replacing `service-account.json` and restarting.
@@ -301,4 +317,5 @@ You can revoke any token or OAuth connection at any time in **Réglages**.
 | Import shows **Échec** | data.education.gouv.fr unreachable or changed; the error is shown in Réglages. Existing holidays are kept. Retry later. |
 | An agent gets `401` | Token revoked or mistyped, or OAuth connection revoked; reconnect or create a new token. |
 | `check-config` or the server: `unable to open database file` / permission denied | The `data` folder or `service-account.json` is not owned by uid 65532 (see step 6). |
+| Adding or editing events answers `Les catégories sont en cours de modification` | A color change is unfinished: Réglages → Catégories → **Reprendre**. |
 | An agent can read but not add events | The token is read-only; create one with **Lecture et écriture**. |

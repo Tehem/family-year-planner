@@ -194,6 +194,21 @@ impl TypeAdmin {
         self.registry.is_migrating()
     }
 
+    /// Demo only: forget every customization and go back to the default catalog.
+    pub async fn reset(&self) -> Result<(), TypeAdminError> {
+        let _guard = self.lock.lock().await;
+        sqlx::query("DELETE FROM type_settings")
+            .execute(&self.db.pool)
+            .await?;
+        sqlx::query("DELETE FROM type_migrations")
+            .execute(&self.db.pool)
+            .await?;
+        self.registry.set(TypeCatalog::default());
+        self.registry.set_migrating(false);
+        self.store.invalidate_cache();
+        Ok(())
+    }
+
     /// Everything the Catégories section needs.
     pub async fn describe(&self) -> Result<Value, TypeAdminError> {
         let catalog = self.registry.current();

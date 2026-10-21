@@ -1,12 +1,13 @@
 // Header chips: category legend, person filter, view switch.
 import { byId, h, swatch } from "./dom";
-import { hasUnclassified, LEGEND_CATS, members, saveView, state, typeLabelPlural, type Cat, type View } from "./state";
+import { t } from "./i18n";
+import { hasUnclassified, legendCats as baseLegend, members, saveView, state, typeLabelPlural, type Cat, type View } from "./state";
 
 let legendSig = "";
 let whoSig = "";
 
 function legendCats(): Cat[] {
-  return hasUnclassified() ? [...LEGEND_CATS, "unclassified"] : LEGEND_CATS;
+  return hasUnclassified() ? [...baseLegend(), "unclassified"] : baseLegend();
 }
 
 /** Brings the chips in line with the state. Rebuilds the DOM only when the set of chips changed,
@@ -14,7 +15,7 @@ function legendCats(): Cat[] {
 export function buildChips(): void {
   const legend = byId("legend");
   const cats = legendCats();
-  const sig = cats.join(",") + (state.config ? "+cfg" : "");
+  const sig = cats.join(",") + (state.config ? "+cfg" : "") + cats.map(typeLabelPlural).join("|");
   if (sig !== legendSig) {
     legendSig = sig;
     const nodes: Node[] = cats.map((k) => {
@@ -25,8 +26,8 @@ export function buildChips(): void {
       return b;
     });
     const both = h("span", "chip static");
-    both.title = "Vacances scolaires et crèche ou centre de loisirs fermé le même jour";
-    both.append(swatch("both"), document.createTextNode("Les deux"));
+    both.title = t("both.title");
+    both.append(swatch("both"), document.createTextNode(t("both.name")));
     legend.replaceChildren(...nodes, both);
   }
   legend.querySelectorAll<HTMLElement>("[data-cat]").forEach((b) => {
@@ -40,7 +41,7 @@ export function buildChips(): void {
     whoSig = wsig;
     who.replaceChildren(
       ...people.map((p) => {
-        const b = h("button", "chip", p === "all" ? "Tous" : p);
+        const b = h("button", "chip", p === "all" ? t("who.all") : p);
         b.type = "button";
         b.dataset["who"] = p;
         return b;

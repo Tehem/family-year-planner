@@ -37,7 +37,12 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn healthz(State(s): State<AppState>) -> Json<Value> {
-    Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION"), "mode": s.mode.as_str()}))
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "mode": s.mode.as_str(),
+        "default_language": s.config.default_lang(),
+    }))
 }
 
 async fn asset(Path(path): Path<String>) -> Response {

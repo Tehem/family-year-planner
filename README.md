@@ -10,8 +10,10 @@ labelled bars. The data lives in **two Google Calendars**; the app is just a ver
 - 🖨️ **Print / PDF**: the year on one page.
 - 🤖 **MCP server**: any AI agent (Claude, Grok, …) can read and edit the family year, with OAuth 2.1 or a personal access token.
 - 🇫🇷 **Imports**: French school holidays and public holidays, kept up to date automatically.
+- 🌍 **French and English** interface (per-browser `FR | EN` switch, French by default).
+- 🎨 **Configurable categories**: rename them, recolor them (a Google Calendar event color) and add up to three of your own.
 
-The interface is in French; code, docs and MCP tools are in English.
+The interface is in French (default) and English; code, docs and MCP tools are in English.
 
 ## Quick look (no Google account needed)
 

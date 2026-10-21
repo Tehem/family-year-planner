@@ -3,6 +3,7 @@
 [app]
 base_url = "https://famille.example.org"      # public URL, no trailing slash
 timezone = "Europe/Paris"
+default_language = "fr"                       # "fr" or "en": language of visitors who have not chosen one (the FR | EN switch overrides it per browser)
 allowed_emails = ["alex@example.com", "camille@example.com"]
 
 # Name recorded for each login (default: the part of the email before "@").

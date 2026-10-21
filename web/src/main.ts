@@ -1,9 +1,11 @@
 import "./styles.css";
 import { ApiError, getConfig, getMe, resetDemo } from "./api";
 import { gotoYear, loadYear, renderAll } from "./app";
+import { applyTypeColors } from "./colors";
 import { initDialog, openAddToday } from "./dialog";
 import { byId } from "./dom";
 import { initFilters } from "./filters";
+import { adoptLang, applyStatic, mountLangSwitch } from "./i18n";
 import { initInteractions } from "./interact";
 import { closePanel, initPanel } from "./panel";
 import { initPrint } from "./print";
@@ -15,6 +17,8 @@ async function boot(): Promise<void> {
     const [me, config] = await Promise.all([getMe(), getConfig()]);
     state.me = me;
     state.config = config;
+    adoptLang(config.lang);
+    applyTypeColors(config.types);
     // The server clock (fixed in tests) decides which year is "now".
     state.year = +config.today.slice(0, 4);
   } catch (e) {
@@ -29,6 +33,8 @@ async function boot(): Promise<void> {
 }
 
 function init(): void {
+  applyStatic();
+  mountLangSwitch(byId("langSwitch"));
   state.view = loadView();
   initFilters(renderAll);
   initPanel();

@@ -4,57 +4,65 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>Réglages · Année en famille</title>
+<title data-i18n="set.pageTitle">Réglages · Année en famille</title>
 </head>
 <body class="settings-page">
 <header class="top">
   <div class="brand">
-    <h1>Réglages</h1>
+    <h1 data-i18n="set.title">Réglages</h1>
   </div>
   <div class="actions">
-    <a class="btn ghost" href="/">← Retour à l’année</a>
+    <div id="langSwitch"></div>
+    <a class="btn ghost" href="/" data-i18n="set.back">← Retour à l’année</a>
   </div>
 </header>
 <p class="err page-err" id="pageErr" role="alert" hidden></p>
 <main class="settings" id="settings">
-  <section class="set-card" aria-labelledby="hAgents">
-    <h2 id="hAgents">Accès des agents</h2>
+  <section class="set-card" aria-labelledby="hTypes">
+    <h2 id="hTypes" data-i18n="types.title">Catégories</h2>
+    <p class="muted" data-i18n="types.help">Renommez les catégories et choisissez leur couleur : la couleur correspond à une couleur d’événement de Google Agenda. Vous pouvez aussi ajouter vos propres catégories.</p>
+    <div id="typesMigration"></div>
+    <div id="typesEditor"></div>
+  </section>
 
-    <h3>Jetons personnels</h3>
+  <section class="set-card" aria-labelledby="hAgents">
+    <h2 id="hAgents" data-i18n="set.agents">Accès des agents</h2>
+
+    <h3 data-i18n="set.tokens">Jetons personnels</h3>
     <div class="tbl-wrap" id="tokens"></div>
     <form class="inline-form" id="tokenForm" novalidate>
-      <label class="f">Nom
-        <input id="tokenName" maxlength="60" placeholder="ex. Grok API" autocomplete="off">
+      <label class="f"><span data-i18n="set.tokens.name">Nom</span>
+        <input id="tokenName" maxlength="60" placeholder="ex. Grok API" autocomplete="off" data-i18n-attr="placeholder:set.tokens.ph">
       </label>
       <fieldset class="mem rights">
-        <legend>Droits</legend>
-        <label><input type="radio" name="scope" value="read" checked> Lecture seule</label>
-        <label><input type="radio" name="scope" value="read_write"> Lecture et écriture</label>
+        <legend data-i18n="set.tokens.rights">Droits</legend>
+        <label><input type="radio" name="scope" value="read" checked> <span data-i18n="set.tokens.read">Lecture seule</span></label>
+        <label><input type="radio" name="scope" value="read_write"> <span data-i18n="set.tokens.readWrite">Lecture et écriture</span></label>
       </fieldset>
-      <button class="btn" type="submit" id="tokenSubmit">Créer le jeton</button>
+      <button class="btn" type="submit" id="tokenSubmit" data-i18n="set.tokens.create">Créer le jeton</button>
     </form>
     <p class="err" id="tokenErr" role="alert" hidden></p>
     <div id="newToken"></div>
 
-    <h3>Connexions OAuth</h3>
+    <h3 data-i18n="set.grants">Connexions OAuth</h3>
     <div class="tbl-wrap" id="grants"></div>
 
-    <h3>Adresse du serveur MCP</h3>
+    <h3 data-i18n="set.mcp">Adresse du serveur MCP</h3>
     <div id="mcp" class="copyrow"></div>
   </section>
 
   <section class="set-card" aria-labelledby="hKiosk">
-    <h2 id="hKiosk">Tablette (mode kiosque)</h2>
-    <p class="muted">Un lien kiosque ouvre l’année en lecture seule sur une tablette, sans connexion.</p>
-    <div><button class="btn" type="button" id="kioskCreate">Créer un lien kiosque</button></div>
+    <h2 id="hKiosk" data-i18n="set.kiosk">Tablette (mode kiosque)</h2>
+    <p class="muted" data-i18n="set.kiosk.help">Un lien kiosque ouvre l’année en lecture seule sur une tablette, sans connexion.</p>
+    <div><button class="btn" type="button" id="kioskCreate" data-i18n="set.kiosk.create">Créer un lien kiosque</button></div>
     <p class="err" id="kioskErr" role="alert" hidden></p>
     <div id="newKiosk"></div>
   </section>
 
   <section class="set-card" aria-labelledby="hImports">
-    <h2 id="hImports">Imports</h2>
+    <h2 id="hImports" data-i18n="set.imports">Imports</h2>
     <p class="muted" id="importStatus" role="status"></p>
-    <div><button class="btn" type="button" id="importNow">Mettre à jour maintenant</button></div>
+    <div><button class="btn" type="button" id="importNow" data-i18n="set.imports.now">Mettre à jour maintenant</button></div>
     <p class="err" id="importErr" role="alert" hidden></p>
     <div class="tbl-wrap" id="runs"></div>
   </section>
@@ -63,11 +71,23 @@
 <dialog id="confirmDlg" aria-labelledby="confirmText">
   <form method="dialog" id="confirmForm">
     <h2 id="confirmText"></h2>
-    <p class="muted">L’accès cesse immédiatement.</p>
+    <p class="muted" data-i18n="set.revokeNote">L’accès cesse immédiatement.</p>
     <p class="err" id="confirmErr" role="alert"></p>
     <div class="dlg-actions">
-      <button type="button" class="btn ghost" id="confirmNo">Annuler</button>
-      <button type="submit" class="btn danger" id="confirmYes">Révoquer</button>
+      <button type="button" class="btn ghost" id="confirmNo" data-i18n="btn.cancel">Annuler</button>
+      <button type="submit" class="btn danger" id="confirmYes" data-i18n="set.revoke">Révoquer</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="typesDlg" aria-labelledby="typesDlgTitle">
+  <form method="dialog" id="typesForm">
+    <h2 id="typesDlgTitle" data-i18n="types.confirm.title">Modifier les couleurs dans Google Agenda ?</h2>
+    <ul id="typesDlgList" class="plain"></ul>
+    <p class="muted" data-i18n="types.confirm.wait">Cela peut prendre quelques instants.</p>
+    <p class="err" id="typesDlgErr" role="alert"></p>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" id="typesDlgNo" data-i18n="btn.cancel">Annuler</button>
+      <button type="submit" class="btn" id="typesDlgYes" data-i18n="types.confirm.ok">Appliquer</button>
     </div>
   </form>
 </dialog>
