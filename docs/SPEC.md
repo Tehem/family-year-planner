@@ -1084,7 +1084,8 @@ existing events (both calendars, all years, series masters, imported events incl
    (the `usageLimits` family: rate limits, daily limit, quota) is retryable and fails the pass. The ids of the skipped
    events are stored with the migration (`type_migrations.skipped`) and logged; `PUT /api/admin/types` returns their
    count (`skipped`), `GET /api/admin/types` returns `skipped: {count, ids}` for the last finished pass, and the
-   Catégories section shows a notice until the next color pass.
+   Catégories section shows a notice until the next color pass. The notice covers the last pass only: a later pass
+   replaces it, even if an earlier skipped event was not fixed by hand meanwhile.
    The pass is **resumable**: before starting, the target catalog and a migration id are stored in
    `type_migrations` (status `running`); every patched event gets the private property
    `fy_migration=<id>` and is skipped if it already carries it. On startup a `running` migration is

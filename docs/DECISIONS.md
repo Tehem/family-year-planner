@@ -419,7 +419,8 @@ alternatives considered.
   freezes the family's calendar. Every other 403 (quota and rate limits, including `dailyLimitExceeded` and
   `calendarUsageLimitsExceeded`) stays retryable: an allow-list of permanent reasons rather than a blacklist of
   quota ones. The skipped ids are stored on the migration row and logged, the PUT response carries their count and
-  the Catégories section shows a persistent notice.
+  the Catégories section shows a notice for the last pass only (a later pass replaces it; the ids stay in the
+  log and in the older migration rows).
 - **Limit:** while a pass is suspended after repeated failures, reads use the old catalog, so already-recolored
   events appear under another type until the migration is resumed. There is no rollback (see the open question
   on the PR).
