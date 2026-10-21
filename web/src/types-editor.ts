@@ -345,8 +345,16 @@ function initDialog(): void {
 
 function renderMigration(): void {
   const host = byId("typesMigration");
+  const skipped = server.skipped
+    ? h("p", "muted", t("types.skipped", { n: String(server.skipped.count) }))
+    : undefined;
+  if (skipped) {
+    skipped.id = "typesSkipped";
+    skipped.setAttribute("role", "status");
+    skipped.title = server.skipped?.ids.join(", ") ?? "";
+  }
   if (!server.migration) {
-    host.replaceChildren();
+    host.replaceChildren(...(skipped ? [skipped] : []));
     return;
   }
   const box = h("div", "banner");
@@ -368,7 +376,7 @@ function renderMigration(): void {
     }
   });
   box.append(resume);
-  host.replaceChildren(box);
+  host.replaceChildren(box, ...(skipped ? [skipped] : []));
 }
 
 export async function initTypesEditor(errorText: (e: unknown) => string): Promise<void> {

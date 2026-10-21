@@ -211,6 +211,7 @@ export interface TypesEditor {
   free_colors: string[];
   types: EditableType[];
   migration: MigrationState | null;
+  skipped: { count: number; ids: string[] } | null;
 }
 export interface TypeChange {
   code: string;
@@ -222,6 +223,8 @@ export interface TypesResult {
   changes: TypeChange[];
   orphans: number;
   applied: boolean;
+  /** Events the color pass could not recolor (they keep their old color). */
+  skipped?: number;
 }
 
 export const getTypes = (): Promise<TypesEditor> => call("GET", "/api/admin/types");

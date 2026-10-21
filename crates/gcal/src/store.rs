@@ -37,12 +37,12 @@ impl DeleteScope {
 }
 
 /// What a color migration did to the events (§19.5).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecolorReport {
     /// Events whose color was rewritten.
     pub patched: usize,
-    /// Events Google refused to patch (not retryable): left as they were, and logged.
-    pub skipped: usize,
+    /// Ids of the events Google refused to patch (not retryable): left as they were.
+    pub skipped: Vec<String>,
 }
 
 /// An event written by the import job (read-only for users).

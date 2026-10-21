@@ -186,6 +186,7 @@ const FR = {
   "types.confirm.wait": "Cela peut prendre quelques instants.",
   "types.migration": "Une modification des couleurs n’est pas terminée. Les modifications sont suspendues tant qu’elle n’est pas reprise.",
   "types.migration.resume": "Reprendre",
+  "types.skipped": "{n} événement(s) n’ont pas pu être recolorés lors du dernier changement de couleurs : ils gardent leur ancienne couleur et apparaissent dans une autre catégorie (ou « Non classé »). Ouvrez-les dans Google Agenda pour les corriger (identifiants dans les journaux du serveur).",
   "types.migration.error": "Dernière erreur : {error}",
   "types.none": "(aucune)",
   // Login
@@ -380,6 +381,7 @@ const EN: Record<Key, string> = {
   "types.confirm.wait": "This can take a few moments.",
   "types.migration": "A color change is unfinished. Edits are suspended until it is resumed.",
   "types.migration.resume": "Resume",
+  "types.skipped": "{n} event(s) could not be recolored by the last color change: they keep their old color and show under another category (or “Unclassified”). Fix them in Google Calendar (ids are in the server log).",
   "types.migration.error": "Last error: {error}",
   "types.none": "(none)",
   "login.pageTitle": "Sign in · Family year",

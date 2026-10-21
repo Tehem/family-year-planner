@@ -414,9 +414,12 @@ alternatives considered.
   events, so an event written with a stale color heals on the next import. The in-memory catalog switches only
   when the pass completes.
 - **Alternatives:** blocking recoloring when events exist; recoloring one type at a time (no swaps); a cancel path.
-- **Also:** an event Google refuses for good (a 400, or a 403 that is not a rate limit) or that disappeared is
-  skipped and logged, so that one event the service account cannot modify never freezes the family's calendar;
-  the migration row records how many were left as they were. Rate-limit 403s stay retryable.
+- **Also:** an event Google refuses for good (a 400, or a 403 with a known permanent reason: `forbidden`, `forbiddenForNonOrganizer`, `requiredAccessLevel`,
+  `notACalendarUser`) or that disappeared is skipped, so that one event the service account cannot modify never
+  freezes the family's calendar. Every other 403 (quota and rate limits, including `dailyLimitExceeded` and
+  `calendarUsageLimitsExceeded`) stays retryable: an allow-list of permanent reasons rather than a blacklist of
+  quota ones. The skipped ids are stored on the migration row and logged, the PUT response carries their count and
+  the Catégories section shows a persistent notice.
 - **Limit:** while a pass is suspended after repeated failures, reads use the old catalog, so already-recolored
   events appear under another type until the migration is resumed. There is no rollback (see the open question
   on the PR).

@@ -14,7 +14,7 @@ use crate::store::StoreError;
 pub enum ApiError {
     NotFound,
     PreconditionFailed,
-    /// Google refused this very request (400, or a 403 that is not a rate limit): retrying cannot
+    /// Google refused this very request (400, or a 403 with a permanent reason): retrying cannot
     /// help, but the other events are unaffected.
     Rejected(String),
     Upstream(String),
@@ -135,11 +135,8 @@ impl Client {
             _ => {
                 let text = resp.text().await.unwrap_or_default();
                 let msg = format!("Google answered {status}: {}", truncate(&text));
-                // A 403 is also how Google reports a rate limit: that one is worth retrying.
-                let rate_limited =
-                    text.contains("ateLimitExceeded") || text.contains("uotaExceeded");
                 if status == StatusCode::BAD_REQUEST
-                    || (status == StatusCode::FORBIDDEN && !rate_limited)
+                    || (status == StatusCode::FORBIDDEN && permanent_forbidden(&text))
                 {
                     Err(ApiError::Rejected(msg))
                 } else {
@@ -260,5 +257,59 @@ impl ErasedBody for GEvent {
 impl ErasedBody for Value {
     fn as_value(&self) -> Value {
         self.clone()
+    }
+}
+
+/// Reasons of a 403 that retrying cannot fix. Any other 403 (the `usageLimits` family:
+/// `rateLimitExceeded`, `userRateLimitExceeded`, `dailyLimitExceeded`, `quotaExceeded`,
+/// `calendarUsageLimitsExceeded`, ...) is a quota that comes back, so it stays retryable.
+const PERMANENT_FORBIDDEN: [&str; 4] = [
+    "forbidden",
+    "forbiddenForNonOrganizer",
+    "requiredAccessLevel",
+    "notACalendarUser",
+];
+
+fn permanent_forbidden(body: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let reasons: Vec<&str> = v["error"]["errors"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|e| e["reason"].as_str()).collect())
+        .unwrap_or_default();
+    !reasons.is_empty() && reasons.iter().all(|r| PERMANENT_FORBIDDEN.contains(r))
+}
+
+#[cfg(test)]
+mod forbidden_tests {
+    use super::permanent_forbidden;
+
+    fn body(reason: &str) -> String {
+        format!(r#"{{"error":{{"errors":[{{"reason":"{reason}"}}]}}}}"#)
+    }
+
+    #[test]
+    fn only_known_permanent_reasons_are_permanent() {
+        for r in [
+            "forbidden",
+            "forbiddenForNonOrganizer",
+            "requiredAccessLevel",
+        ] {
+            assert!(permanent_forbidden(&body(r)), "{r}");
+        }
+        for r in [
+            "rateLimitExceeded",
+            "userRateLimitExceeded",
+            "sharingRateLimitExceeded",
+            "quotaExceeded",
+            "dailyLimitExceeded",
+            "calendarUsageLimitsExceeded",
+            "somethingNew",
+        ] {
+            assert!(!permanent_forbidden(&body(r)), "{r}");
+        }
+        assert!(!permanent_forbidden("not json"));
+        assert!(!permanent_forbidden("{}"));
     }
 }

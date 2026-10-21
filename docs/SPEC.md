@@ -1079,8 +1079,12 @@ existing events (both calendars, all years, series masters, imported events incl
 3. User writes and import runs hold a shared guard, the migration an exclusive one: it starts only when the
    writes in flight are done. The pass runs in a task detached from the HTTP request. The importer compares the
    type of existing events, so an event written with a stale color heals on the next import.
-   An event that Google refuses for good (a 400, or a 403 that is not a rate limit) or that vanished is skipped and
-   logged instead of aborting the pass; the migration then records how many were left as they were.
+   An event that Google refuses for good (a 400, or a 403 whose reason is a known permanent one: `forbidden`, `forbiddenForNonOrganizer`,
+   `requiredAccessLevel`, `notACalendarUser`) or that vanished is skipped instead of aborting the pass; any other 403
+   (the `usageLimits` family: rate limits, daily limit, quota) is retryable and fails the pass. The ids of the skipped
+   events are stored with the migration (`type_migrations.skipped`) and logged; `PUT /api/admin/types` returns their
+   count (`skipped`), `GET /api/admin/types` returns `skipped: {count, ids}` for the last finished pass, and the
+   Catégories section shows a notice until the next color pass.
    The pass is **resumable**: before starting, the target catalog and a migration id are stored in
    `type_migrations` (status `running`); every patched event gets the private property
    `fy_migration=<id>` and is skipped if it already carries it. On startup a `running` migration is

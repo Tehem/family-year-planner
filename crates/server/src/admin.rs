@@ -79,8 +79,10 @@ async fn types_put(
         ));
     }
     // The preview (a full scan of both calendars) is the dry run's job: the page asks for it first.
-    s.type_admin.apply_detached(target).await?;
-    Ok(Json(json!({"changes": [], "orphans": 0, "applied": true})))
+    let skipped = s.type_admin.apply_detached(target).await?;
+    Ok(Json(
+        json!({"changes": [], "orphans": 0, "applied": true, "skipped": skipped}),
+    ))
 }
 
 /// Resume a color migration left unfinished by a failure.

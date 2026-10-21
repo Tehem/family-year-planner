@@ -669,7 +669,7 @@ impl CalendarStore for DemoStore {
         }
         Ok(RecolorReport {
             patched,
-            skipped: 0,
+            skipped: Vec::new(),
         })
     }
 }

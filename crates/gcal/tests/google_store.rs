@@ -837,7 +837,7 @@ async fn recolor_applies_a_swap_in_one_pass_and_skips_migrated_events() {
         .await
         .unwrap();
     assert_eq!(
-        (n.patched, n.skipped),
+        (n.patched, n.skipped.len()),
         (3, 0),
         "d is not in the mapping, e already carries the migration id"
     );
@@ -930,31 +930,40 @@ async fn recolor_skips_an_event_google_refuses_for_good_but_not_a_rate_limit() {
         .recolor("m", &mapping, &TypeCatalog::default())
         .await
         .unwrap();
-    assert_eq!((report.patched, report.skipped), (2, 2));
+    assert_eq!((report.patched, report.skipped.len()), (2, 2));
+    let mut ids = report.skipped.clone();
+    ids.sort();
+    assert_eq!(ids, ["gone", "locked"]);
 
-    // A 403 that is a rate limit is transient: the pass fails, to be retried.
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path(events_path(FAMILLE)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
-            all_day("a", "A", Some("9"), "2026-02-21", "2026-03-01")
-        ]})))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(events_path(REPERES)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
-        .mount(&server)
-        .await;
-    Mock::given(method("PATCH"))
-        .respond_with(
-            ResponseTemplate::new(403)
-                .set_body_json(json!({"error": {"errors": [{"reason": "rateLimitExceeded"}]}})),
-        )
-        .mount(&server)
-        .await;
-    let err = store(&server)
-        .recolor("m", &mapping, &TypeCatalog::default())
-        .await;
-    assert!(matches!(err, Err(StoreError::Upstream(_))));
+    // A 403 that is a quota is transient: the pass fails, to be retried.
+    for reason in [
+        "rateLimitExceeded",
+        "dailyLimitExceeded",
+        "calendarUsageLimitsExceeded",
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(events_path(FAMILLE)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+                all_day("a", "A", Some("9"), "2026-02-21", "2026-03-01")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(events_path(REPERES)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+            .mount(&server)
+            .await;
+        Mock::given(method("PATCH"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(json!({"error": {"errors": [{"reason": reason}]}})),
+            )
+            .mount(&server)
+            .await;
+        let err = store(&server)
+            .recolor("m", &mapping, &TypeCatalog::default())
+            .await;
+        assert!(matches!(err, Err(StoreError::Upstream(_))));
+    }
 }

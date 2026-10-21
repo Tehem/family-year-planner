@@ -100,6 +100,14 @@ pub struct MigrationStatus {
     pub patched: Option<i64>,
 }
 
+/// Events the last finished color pass could not recolor: they keep their old color.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedEvents {
+    pub count: usize,
+    /// Google event ids, to find them in the calendars.
+    pub ids: Vec<String>,
+}
+
 struct Pending {
     id: String,
     target: TypeCatalog,
@@ -255,6 +263,7 @@ impl TypeAdmin {
     pub async fn describe(&self) -> Result<Value, TypeAdminError> {
         let catalog = self.registry.current();
         let migration = self.last_unfinished().await?;
+        let skipped = self.last_skipped().await?;
         Ok(json!({
             "palette": COLOR_NAMES
                 .iter()
@@ -266,6 +275,7 @@ impl TypeAdmin {
             "free_colors": catalog.free_colors(),
             "types": editor_types(&catalog),
             "migration": migration,
+            "skipped": skipped,
         }))
     }
 
@@ -319,7 +329,7 @@ impl TypeAdmin {
     pub async fn apply_detached(
         self: &Arc<Self>,
         target: TypeCatalog,
-    ) -> Result<(), TypeAdminError> {
+    ) -> Result<usize, TypeAdminError> {
         let this = self.clone();
         tokio::spawn(async move { this.apply(target).await })
             .await
@@ -334,8 +344,9 @@ impl TypeAdmin {
             .map_err(|e| TypeAdminError::Database(format!("migration task: {e}")))?
     }
 
-    /// Save `target`: names are applied at once, colors through the migration of §19.5.
-    pub async fn apply(&self, target: TypeCatalog) -> Result<(), TypeAdminError> {
+    /// Save `target`: names are applied at once, colors through the migration of §19.5. Returns
+    /// the number of events the color pass could not recolor.
+    pub async fn apply(&self, target: TypeCatalog) -> Result<usize, TypeAdminError> {
         let _guard = self.lock.try_lock().map_err(|_| TypeAdminError::Busy)?;
         let current = self.registry.current();
         let pending = self.pending().await?;
@@ -347,7 +358,7 @@ impl TypeAdmin {
         }
         if pending.is_none() {
             if *current == target {
-                return Ok(());
+                return Ok(0);
             }
             if self.registry.is_migrating() {
                 return Err(TypeAdminError::Busy);
@@ -358,7 +369,7 @@ impl TypeAdmin {
             self.persist(&target).await?;
             self.registry.set(target);
             self.store.invalidate_cache();
-            return Ok(());
+            return Ok(0);
         }
         let id = match pending {
             Some(p) => p.id,
@@ -400,7 +411,7 @@ impl TypeAdmin {
         id: &str,
         mapping: &Mapping,
         target: &TypeCatalog,
-    ) -> Result<(), TypeAdminError> {
+    ) -> Result<usize, TypeAdminError> {
         // Blocks new writes and waits for the ones in flight; held until the pass is over.
         let _access = self.registry.begin_migration().await;
         let mut last_error = None;
@@ -410,22 +421,17 @@ impl TypeAdmin {
                     self.persist(target).await?;
                     self.registry.set(target.clone());
                     self.store.invalidate_cache();
-                    let note = (report.skipped > 0).then(|| {
-                        format!(
-                            "{} event(s) could not be recolored and were left as they were",
-                            report.skipped
-                        )
-                    });
-                    self.finish_migration(id, "done", Some(report.patched), note)
+                    self.finish_migration(id, "done", Some(report.patched), None, &report.skipped)
                         .await?;
                     self.registry.set_migrating(false);
                     tracing::info!(
                         migration = id,
                         patched = report.patched,
-                        skipped = report.skipped,
+                        skipped = report.skipped.len(),
+                        skipped_ids = ?report.skipped,
                         "type migration finished"
                     );
-                    return Ok(());
+                    return Ok(report.skipped.len());
                 }
                 Err(e) => {
                     tracing::error!(migration = id, attempt, error = %e, "type migration step failed");
@@ -438,7 +444,7 @@ impl TypeAdmin {
         }
         let e = last_error.unwrap_or(StoreError::Upstream("unknown".into()));
         // Events are partially rewritten: writes stay blocked until the migration is resumed.
-        self.finish_migration(id, "failed", None, Some(e.to_string()))
+        self.finish_migration(id, "failed", None, Some(e.to_string()), &[])
             .await?;
         Err(TypeAdminError::Store(e))
     }
@@ -496,14 +502,16 @@ impl TypeAdmin {
         status: &str,
         patched: Option<usize>,
         error: Option<String>,
+        skipped: &[String],
     ) -> Result<(), TypeAdminError> {
         sqlx::query(
-            "UPDATE type_migrations SET status = ?, finished_at = ?, patched = ?, error = ? WHERE id = ?",
+            "UPDATE type_migrations SET status = ?, finished_at = ?, patched = ?, error = ?, skipped = ? WHERE id = ?",
         )
         .bind(status)
         .bind(now_ts())
         .bind(patched.map(|n| n as i64))
         .bind(error)
+        .bind((!skipped.is_empty()).then(|| serde_json::to_string(skipped).unwrap_or_default()))
         .bind(id)
         .execute(&self.db.pool)
         .await?;
@@ -525,6 +533,23 @@ impl TypeAdmin {
             id: row.get("id"),
             target: catalog_from_input(target)?,
             mapping,
+        }))
+    }
+
+    /// The events the latest finished color pass left alone (until the next pass replaces it).
+    async fn last_skipped(&self) -> Result<Option<SkippedEvents>, TypeAdminError> {
+        let row = sqlx::query(
+            "SELECT skipped FROM type_migrations WHERE status = 'done' AND patched IS NOT NULL ORDER BY started_at DESC, rowid DESC LIMIT 1",
+        )
+        .fetch_optional(&self.db.pool)
+        .await?;
+        let ids: Vec<String> = row
+            .and_then(|r| r.get::<Option<String>, _>("skipped"))
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+        Ok((!ids.is_empty()).then_some(SkippedEvents {
+            count: ids.len(),
+            ids,
         }))
     }
 
@@ -914,5 +939,35 @@ mod tests {
         assert_eq!(*registry.current(), target);
         assert!(!registry.is_migrating());
         assert_eq!(status(&admin).await, "done");
+    }
+
+    #[tokio::test]
+    async fn skipped_events_of_the_last_pass_are_described() {
+        let (admin, _registry, _demo) = admin().await;
+        assert!(admin.describe().await.unwrap()["skipped"].is_null());
+        let target = TypeCatalog::default();
+        let id = admin
+            .record_migration(&target, &Mapping::new())
+            .await
+            .unwrap();
+        let ids = vec!["ev1".to_string(), "ev2".to_string()];
+        admin
+            .finish_migration(&id, "done", Some(3), None, &ids)
+            .await
+            .unwrap();
+        let described = admin.describe().await.unwrap();
+        assert_eq!(described["skipped"]["count"], 2);
+        assert_eq!(described["skipped"]["ids"], json!(["ev1", "ev2"]));
+        assert!(described["migration"].is_null());
+        // The next clean pass replaces it.
+        let id = admin
+            .record_migration(&target, &Mapping::new())
+            .await
+            .unwrap();
+        admin
+            .finish_migration(&id, "done", Some(1), None, &[])
+            .await
+            .unwrap();
+        assert!(admin.describe().await.unwrap()["skipped"].is_null());
     }
 }

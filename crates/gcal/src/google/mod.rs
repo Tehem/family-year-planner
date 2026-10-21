@@ -425,7 +425,7 @@ impl CalendarStore for GoogleStore {
                         // Deleted meanwhile, or refused for good: leave this one, go on.
                         Err(e @ (ApiError::NotFound | ApiError::Rejected(_))) => {
                             tracing::warn!(event = id, error = ?e, "color migration skipped an event");
-                            report.skipped += 1;
+                            report.skipped.push(id.to_string());
                         }
                         Err(other) => return Err(other.into()),
                     }
