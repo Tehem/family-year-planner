@@ -1,0 +1,28 @@
+# Variant for a server where ports 80/443 already belong to another reverse proxy
+# (Caddy, nginx, Traefik…) running in Docker. No Caddy here and no published port: the app joins
+# the Docker network of that proxy (PROXY_NETWORK in .env) and the proxy forwards
+# https://famille.example.org to annee:8080. See docs/SETUP.md ("Shared server").
+# Install it as /opt/annee/docker-compose.yml.
+services:
+  annee:
+    image: ghcr.io/OWNER/family-year-planner:latest   # replace OWNER by your GitHub user or organisation (lowercase)
+    env_file: .env
+    volumes:
+      - ./config:/config:ro
+      - ./secrets:/secrets:ro
+      - ./data:/data
+    labels:
+      # Watchtower (if the other project runs it) must not restart this app on its own schedule.
+      - com.centurylinklabs.watchtower.enable=false
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/annee", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+networks:
+  default:
+    name: ${PROXY_NETWORK:?set PROXY_NETWORK in .env (name of the proxy's Docker network)}
+    external: true

@@ -1,0 +1,30 @@
+# Family Year Planner — configuration (copy to /opt/annee/config/config.toml)
+
+[app]
+base_url = "https://famille.example.org"      # public URL, no trailing slash
+timezone = "Europe/Paris"
+allowed_emails = ["alex@example.com", "camille@example.com"]
+
+# Name recorded for each login (default: the part of the email before "@").
+[app.user_names]
+"alex@example.com" = "Alex"
+"camille@example.com" = "Camille"
+
+[family]
+members = ["Alex", "Camille", "Sacha", "Noé"]   # order = display order of the person filter
+
+[calendars]
+reperes_id = "xxxxxxxx@group.calendar.google.com"
+famille_id = "yyyyyyyy@group.calendar.google.com"
+
+[imports]
+school_zone = "Zone B"
+school_location = "Rennes"          # académie, as written in the dataset's `location` field
+public_holidays = "metropole"       # only value supported in V1
+schedule = "0 0 4 1 * *"            # cron (sec min hour dom mon dow), Europe/Paris: 1st of month 04:00
+school_years_ahead = 1              # import current school year + N following
+public_holiday_years_ahead = 2      # import current year + N following
+
+[kiosk]
+refresh_minutes = 5
+default_view = "week"               # "week" or "month"

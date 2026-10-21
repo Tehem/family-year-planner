@@ -1,0 +1,11 @@
+//! Calendar stores for *Family Year Planner*: the `CalendarStore` trait, the in-memory `DemoStore`
+//! and the Google Calendar REST `GoogleStore`.
+
+pub mod demo;
+pub mod google;
+pub mod recurrence;
+pub mod store;
+
+pub use demo::DemoStore;
+pub use google::{GoogleConfig, GoogleStore};
+pub use store::{CalendarStore, DeleteScope, ImportedEvent, StoreError, StoreResult};

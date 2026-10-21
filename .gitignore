@@ -1,0 +1,13 @@
+/target
+node_modules
+/web/dist
+!/web/dist/.gitkeep
+/web/test-results
+/web/playwright-report
+/web/tests/__screenshots__/actual
+.DS_Store
+.env
+/data
+*.db
+*.db-*
+.claude/

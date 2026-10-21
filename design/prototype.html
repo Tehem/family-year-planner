@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Année en famille</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF1F5; --cell:#FFFFFF; --weekend:#E0E5EC; --ink:#1B2130; --muted:#6F7889; --line:#D3D9E2;
+  --school:#FFE6A3; --daycare:#F9C6D1; --both:#FFBE7A; --bday:#BDE6B2; --shade:rgba(20,30,50,.10);
+  --today:#1B2130; --sel:rgba(47,127,224,.25); --panel:#FFFFFF;
+  --shadow:0 14px 36px rgba(20,30,50,.20);
+  --c-birthday:#E0457B; --c-celebration:#8B5CF6; --c-gathering:#E5533D; --c-stay:#2A9563;
+  --c-trip:#2F7FE0; --c-holiday:#D93A3A;
+  --cs:40px;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#11141A; --cell:#1B2029; --weekend:#252C38; --ink:#E7EAF0; --muted:#8C95A6; --line:#2C3341;
+    --school:#4A3D10; --daycare:#4F1E2B; --both:#5A3412; --bday:#1F4A27; --shade:rgba(255,255,255,.07);
+    --today:#E7EAF0; --sel:rgba(76,147,240,.30); --panel:#1F2530; --shadow:0 14px 36px rgba(0,0,0,.5);
+    --c-birthday:#D9497E; --c-celebration:#8E63F0; --c-gathering:#EF6A52; --c-stay:#2E9E68;
+    --c-trip:#3B82E0; --c-holiday:#F05A5A;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11141A; --cell:#1B2029; --weekend:#252C38; --ink:#E7EAF0; --muted:#8C95A6; --line:#2C3341;
+  --school:#4A3D10; --daycare:#4F1E2B; --both:#5A3412; --bday:#1F4A27; --shade:rgba(255,255,255,.07);
+  --today:#E7EAF0; --sel:rgba(76,147,240,.30); --panel:#1F2530; --shadow:0 14px 36px rgba(0,0,0,.5);
+  --c-birthday:#D9497E; --c-celebration:#8E63F0; --c-gathering:#EF6A52; --c-stay:#2E9E68;
+  --c-trip:#3B82E0; --c-holiday:#F05A5A;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+body{margin:0;height:100%;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);
+  font-family:"Bricolage Grotesque",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--c-trip);outline-offset:2px}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1.1rem;padding:.6rem 1rem .4rem}
+.brand{display:flex;align-items:center;gap:.8rem}
+h1{margin:0;font-size:1.35rem;font-weight:800;letter-spacing:-.015em}
+.yearnav,.seg{display:flex;align-items:center;gap:.1rem;background:var(--cell);border:1px solid var(--line);border-radius:999px;padding:.12rem}
+.yearnav button{border:0;background:none;width:1.8rem;height:1.8rem;border-radius:50%;cursor:pointer;font-size:1.1rem;line-height:1}
+.yearnav button:hover{background:var(--weekend)}
+.yearnav span{font-weight:800;font-size:1.05rem;min-width:3ch;text-align:center;font-variant-numeric:tabular-nums}
+.seg button{border:0;background:none;border-radius:999px;padding:.25rem .7rem;font-size:.82rem;font-weight:600;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.legend,.who{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
+.who{margin-left:auto}
+.chip{border:1px solid var(--line);background:var(--cell);border-radius:999px;padding:.22rem .6rem;font-size:.8rem;font-weight:500;
+  display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;line-height:1.2}
+.chip[aria-pressed="false"]{background:transparent;opacity:.5}
+.chip.static{cursor:default;background:transparent;border-style:dashed}
+.who .chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.sw{width:.75rem;height:.75rem;border-radius:3px;background:var(--cc);flex:none}
+.sw.tint{box-shadow:inset 0 0 0 1px var(--line)}
+.sw.phs{background:var(--weekend);color:var(--c-holiday);font-size:.5rem;font-weight:800;display:grid;place-items:center;line-height:1;width:.95rem;height:.95rem}
+.actions{display:flex;gap:.3rem}
+.btn{border:0;background:var(--ink);color:var(--bg);border-radius:999px;padding:.32rem .8rem;font-size:.82rem;font-weight:600;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+.btn.danger{background:var(--c-holiday);color:#fff}
+
+/* board */
+.board{flex:1;min-height:0;overflow:auto;padding:4px 12px 10px}
+.canvas{position:relative;margin:0 auto}
+.hd{position:absolute;color:var(--muted);display:flex;align-items:center;white-space:nowrap;line-height:1}
+.hd.wd{justify-content:center;font-size:max(9px,calc(var(--cs)*.26))}
+.hd.wd.we{font-weight:800}
+.hd.mo{font-weight:700;font-size:max(11px,calc(var(--cs)*.32));color:var(--ink)}
+.v-month .hd.mo{color:var(--muted);font-weight:600}
+.cell{position:absolute;width:calc(var(--cs) - 3px);height:calc(var(--cs) - 3px);border-radius:calc(var(--cs)*.15);
+  background:var(--cell);user-select:none;-webkit-user-select:none;cursor:pointer}
+.cell.we{background:var(--weekend)}
+.cell.sc{--tint:var(--school)} .cell.dc{--tint:var(--daycare)} .cell.sc.dc{--tint:var(--both)}
+.cell.sc,.cell.dc{background:var(--tint)}
+.cell.we.sc,.cell.we.dc{background:linear-gradient(var(--shade),var(--shade)),var(--tint)}
+.cell.bd{background:var(--bday)}
+.cell.we.bd{background:linear-gradient(var(--shade),var(--shade)),var(--bday)}
+.cell.bd.sc,.cell.bd.dc{box-shadow:inset 0 calc(var(--cs) * -.13) 0 var(--tint)}
+.cell.sel{background:var(--sel);box-shadow:inset 0 0 0 2px var(--c-trip)}
+.cell.today{box-shadow:inset 0 0 0 2px var(--today)}
+.dn{position:absolute;top:calc(var(--cs)*.07);left:calc(var(--cs)*.08);font-size:max(8px,calc(var(--cs)*.21));line-height:1;color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.cell.first .dn{color:var(--ink);font-weight:800}
+.cell.ph .dn{color:var(--c-holiday);font-weight:800}
+.cell.today .dn{color:var(--ink);font-weight:800}
+.mk{position:absolute;display:flex;gap:2px;align-items:center}
+.v-month .mk{top:calc(var(--cs)*.05);right:calc(var(--cs)*.07)}
+.v-week .mk{bottom:calc(var(--cs)*.06);left:calc(var(--cs)*.05);flex-direction:column-reverse}
+.dot{display:block;width:calc(var(--cs)*.17);height:calc(var(--cs)*.17);border-radius:50%;background:var(--cc)}
+.dot.more{background:var(--muted)}
+.cake{font-size:calc(var(--cs)*.24);line-height:1}
+
+.bar{position:absolute;cursor:pointer;background:var(--cc);color:#fff;border-radius:calc(var(--cs)*.08);overflow:hidden;
+  font-size:max(8px,calc(var(--cs)*.19));font-weight:600;line-height:calc(var(--cs)*.3);white-space:nowrap;text-overflow:ellipsis}
+.bar.h{padding:0 calc(var(--cs)*.12)}
+.bar.v{writing-mode:vertical-rl;padding:calc(var(--cs)*.12) 0}
+.bar.h.ca{border-top-left-radius:0;border-bottom-left-radius:0}
+.bar.h.cb{border-top-right-radius:0;border-bottom-right-radius:0}
+.bar.v.ca{border-top-left-radius:0;border-top-right-radius:0}
+.bar.v.cb{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.bar:hover{filter:brightness(1.08)}
+.cat-birthday{--cc:var(--bday)} .cat-celebration{--cc:var(--c-celebration)} .cat-gathering{--cc:var(--c-gathering)}
+.cat-stay{--cc:var(--c-stay)} .cat-trip{--cc:var(--c-trip)} .cat-school{--cc:var(--school)} .cat-daycare{--cc:var(--daycare)}
+.cat-holiday{--cc:var(--c-holiday)} .cat-both{--cc:var(--both)}
+.hint{display:none;text-align:center;color:var(--muted);font-size:.85rem;margin:0 0 .4rem}
+@media (orientation:portrait) and (max-width:760px){.hint{display:block}}
+
+/* tooltip */
+.tip{position:fixed;z-index:30;pointer-events:none;background:var(--panel);border-radius:10px;box-shadow:var(--shadow);
+  padding:.55rem .7rem;font-size:.82rem;max-width:270px;opacity:0;transition:opacity .08s}
+.tip.on{opacity:1}
+.tip b{display:block;margin-bottom:.25rem}
+.row{display:flex;gap:.45rem;align-items:center;padding:.1rem 0}
+.tip .empty-note{color:var(--muted)}
+
+/* panel */
+.panel{position:fixed;top:0;right:0;height:100%;width:min(340px,100%);background:var(--panel);box-shadow:var(--shadow);z-index:40;
+  transform:translateX(105%);transition:transform .2s ease;overflow:auto;
+  padding:calc(env(safe-area-inset-top,0px) + 1rem) 1.1rem calc(env(safe-area-inset-bottom,0px) + 1rem)}
+.panel.open{transform:none}
+.panel .x{position:absolute;top:calc(env(safe-area-inset-top,0px) + .6rem);right:.6rem;border:0;background:none;font-size:1.4rem;cursor:pointer;width:2rem;height:2rem;border-radius:50%}
+.panel .x:hover{background:var(--weekend)}
+.panel h2{margin:.2rem 2rem .3rem 0;font-size:1.25rem;line-height:1.2;font-weight:800;letter-spacing:-.01em}
+.panel .sub{color:var(--muted);margin:0 0 1rem;font-size:.9rem}
+.items{list-style:none;margin:0 0 1.1rem;padding:0;display:flex;flex-direction:column;gap:.3rem}
+.items li>*{display:flex;gap:.55rem;align-items:center;width:100%;text-align:left;padding:.45rem .55rem;border-radius:8px;background:var(--bg);border:0;font-size:.9rem}
+.items button{cursor:pointer}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:.45rem .8rem;margin:0 0 1.2rem;font-size:.9rem}
+.meta dt{color:var(--muted)} .meta dd{margin:0}
+.nothing{color:var(--muted);font-size:.9rem;margin:0 0 1rem}
+
+/* dialog */
+dialog{border:0;border-radius:14px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);padding:1.2rem 1.2rem 1rem;width:min(420px,92vw)}
+dialog::backdrop{background:rgba(10,15,25,.45)}
+dialog h2{margin:0 0 .9rem;font-size:1.2rem;font-weight:800}
+.f{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.75rem;font-size:.85rem;color:var(--muted)}
+.f input,.f select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:.45rem .55rem;font-size:.95rem}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.mem{display:flex;flex-wrap:wrap;gap:.6rem;color:var(--ink);font-size:.9rem;border:0;padding:0;margin:0 0 .9rem}
+.mem legend{color:var(--muted);font-size:.85rem;margin-bottom:.3rem;padding:0}
+.mem label{display:flex;gap:.3rem;align-items:center}
+.err{color:var(--c-holiday);font-size:.82rem;min-height:1em;margin:0 0 .5rem}
+.dlg-actions{display:flex;justify-content:flex-end;gap:.4rem}
+@media (prefers-reduced-motion:reduce){.panel,.tip{transition:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Année en famille</h1>
+    <div class="yearnav">
+      <button id="prev" aria-label="Année précédente">‹</button>
+      <span id="yl"></span>
+      <button id="next" aria-label="Année suivante">›</button>
+    </div>
+    <div class="seg" id="view" role="group" aria-label="Affichage">
+      <button data-view="week">Semaines</button>
+      <button data-view="month">Mois</button>
+    </div>
+  </div>
+  <div class="legend" id="legend" role="group" aria-label="Catégories affichées"></div>
+  <div class="who" id="who" role="group" aria-label="Événements de"></div>
+  <div class="actions">
+    <button class="btn" id="addBtn">Ajouter un événement</button>
+    <button class="btn ghost" id="reset" title="Données de démonstration. Vos modifications sont enregistrées uniquement dans ce navigateur.">Réinitialiser la démo</button>
+  </div>
+</header>
+<main class="board" id="board">
+  <p class="hint">Tournez votre téléphone pour voir l’année entière.</p>
+  <div class="canvas" id="canvas"></div>
+</main>
+<div class="tip" id="tip" role="tooltip"></div>
+<aside class="panel" id="panel" aria-label="Détails">
+  <button class="x" id="closePanel" aria-label="Fermer">×</button>
+  <div id="panelBody"></div>
+</aside>
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <h2>Nouvel événement</h2>
+    <label class="f">Titre<input id="fTitle" maxlength="80" placeholder="ex. Week-end à la maison de la plage"></label>
+    <label class="f">Catégorie<select id="fCat"></select></label>
+    <div class="two">
+      <label class="f">Premier jour<input type="date" id="fStart"></label>
+      <label class="f">Dernier jour<input type="date" id="fEnd"></label>
+    </div>
+    <fieldset class="mem" id="fMem"><legend>Qui est concerné ?</legend></fieldset>
+    <p class="err" id="fErr"></p>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" id="cancel">Annuler</button>
+      <button type="submit" class="btn">Ajouter</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(function(){
+const CATS = {
+  birthday:'Anniversaires', celebration:'Fêtes & cérémonies', gathering:'Réunions de famille', stay:'Maisons de famille',
+  trip:'Voyages & vacances', school:'Vacances scolaires', daycare:'Crèche fermée', holiday:'Jours fériés'
+};
+const TINTS = ['school','daycare','birthday'];
+const EDITABLE = ['birthday','celebration','gathering','stay','trip','daycare'];
+const SINGULAR = {birthday:'Anniversaire',celebration:'Fête ou cérémonie',gathering:'Réunion de famille',stay:'Séjour en maison de famille',trip:'Voyage ou vacances',daycare:'Fermeture de la crèche',school:'Vacances scolaires',holiday:'Jour férié'};
+const PEOPLE = ['Alex','Camille','Sacha','Noé'];
+const ALL = PEOPLE, KIDS = ['Sacha','Noé'];
+const MONTHS = ['Janv.','Févr.','Mars','Avr.','Mai','Juin','Juil.','Août','Sept.','Oct.','Nov.','Déc.'];
+const WD = 'LMMJVSD';
+const KEY = 'family-year-v0';
+const LANES = 2;
+
+/* ---------- dates ---------- */
+const pad = n => String(n).padStart(2,'0');
+const iso = (y,m,d) => `${y}-${pad(m)}-${pad(d)}`;
+const parse = s => { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); };
+const fromDate = dt => iso(dt.getFullYear(), dt.getMonth()+1, dt.getDate());
+const addDays = (s,n) => { const d=parse(s); d.setDate(d.getDate()+n); return fromDate(d); };
+const diff = (a,b) => Math.round((parse(b)-parse(a))/864e5);
+const span = (s,e) => diff(s,e)+1;
+const dow = s => (parse(s).getDay()+6)%7;
+const todayIso = () => fromDate(new Date());
+const fmtLong = s => parse(s).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+const fmtShort = s => parse(s).toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+const fmtRange = (s,e) => s===e ? fmtLong(s) : `du ${fmtShort(s)} au ${fmtShort(e)} ${parse(e).getFullYear()}`;
+const cap = t => t.charAt(0).toUpperCase()+t.slice(1);
+function eachDay(s,e,Y,fn){ const a = s<`${Y}-01-01`?`${Y}-01-01`:s, b = e>`${Y}-12-31`?`${Y}-12-31`:e; for(let d=a; d<=b; d=addDays(d,1)) fn(d); }
+function easter(Y){ const a=Y%19,b=Math.floor(Y/100),c=Y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),
+  h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),
+  mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1; return iso(Y,mo,da); }
+function publicHolidays(Y){
+  const E = easter(Y), r = {};
+  r[iso(Y,1,1)]="Jour de l'An"; r[addDays(E,1)]='Lundi de Pâques'; r[iso(Y,5,1)]='Fête du Travail'; r[iso(Y,5,8)]='Victoire 1945';
+  r[addDays(E,39)]='Ascension'; r[addDays(E,50)]='Lundi de Pentecôte'; r[iso(Y,7,14)]='Fête nationale'; r[iso(Y,8,15)]='Assomption';
+  r[iso(Y,11,1)]='Toussaint'; r[iso(Y,11,11)]='Armistice 1918'; r[iso(Y,12,25)]='Noël'; return r;
+}
+/* Approximate zone C school holidays (mock, to be replaced by the data.education.gouv.fr import) */
+const SCHOOL = {
+  2026:[["Vacances de Noël",'2026-01-01','2026-01-04'],["Vacances d'hiver",'2026-02-21','2026-03-08'],["Vacances de printemps",'2026-04-18','2026-05-03'],
+        ["Pont de l'Ascension",'2026-05-14','2026-05-17'],["Vacances d'été",'2026-07-04','2026-08-31'],["Vacances de la Toussaint",'2026-10-17','2026-11-01'],["Vacances de Noël",'2026-12-19','2026-12-31']],
+  2027:[["Vacances de Noël",'2027-01-01','2027-01-03'],["Vacances d'hiver",'2027-02-20','2027-03-07'],["Vacances de printemps",'2027-04-17','2027-05-02'],
+        ["Pont de l'Ascension",'2027-05-06','2027-05-09'],["Vacances d'été",'2027-07-03','2027-08-31'],["Vacances de la Toussaint",'2027-10-23','2027-11-07'],["Vacances de Noël",'2027-12-18','2027-12-31']]
+};
+function mock(Y){
+  const d=(m,dd)=>iso(Y,m,dd), E=easter(Y);
+  return [
+    ["Anniversaire de Mamie Odile",'birthday',d(1,17),null,ALL],
+    ["Anniversaire de Sacha",'birthday',d(3,12),null,ALL],
+    ["Anniversaire de Noé",'birthday',d(6,3),null,ALL],
+    ["Anniversaire de Camille",'birthday',d(9,21),null,ALL],
+    ["Anniversaire de Alex",'birthday',d(11,28),null,ALL],
+    ["Baptême de la cousine Lou",'celebration',d(4,26),null,ALL],
+    ["Mariage de Julien et Sarah",'celebration',d(6,13),d(6,14),['Alex','Camille']],
+    ["Dîner des 40 ans de Marc",'celebration',d(10,17),null,['Alex','Camille']],
+    ["Semaine de ski aux Arcs",'trip',d(2,21),d(2,28),ALL],
+    ["Pâques chez les beaux-parents",'stay',addDays(E,-1),addDays(E,1),ALL],
+    ["Les enfants chez Mamie",'stay',d(4,20),d(4,24),KIDS],
+    ["Long week-end à Lisbonne",'trip',d(5,14),d(5,17),['Alex','Camille']],
+    ["Cousinade en Bretagne",'gathering',d(7,17),d(7,19),ALL],
+    ["Road trip en Italie",'trip',d(7,25),d(8,2),ALL],
+    ["L'été à la maison de Normandie",'stay',d(8,3),d(8,16),ALL],
+    ["Crèche fermée",'daycare',d(8,3),d(8,24),['Noé']],
+    ["Journée pédagogique de la crèche",'daycare',d(3,13),null,['Noé']],
+    ["Week-end des cousins",'gathering',d(10,3),d(10,4),ALL],
+    ["Noël chez Mamie Odile",'stay',d(12,23),d(12,26),ALL],
+    ["Crèche fermée",'daycare',d(12,24),d(12,31),['Noé']],
+  ].map((e,i)=>({id:`m${Y}-${i}`,title:e[0],cat:e[1],start:e[2],end:e[3]||e[2],members:e[4]}));
+}
+
+/* ---------- state ---------- */
+let store = {added:[],deleted:[],view:'week'};
+try { const raw = localStorage.getItem(KEY); if(raw) store = Object.assign(store, JSON.parse(raw)); } catch(e){}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch(e){} };
+const state = { year:new Date().getFullYear(), hidden:new Set(), member:'all', byDay:{}, W:1, H:1 };
+
+function events(Y){
+  const lo=`${Y}-01-01`, hi=`${Y}-12-31`;
+  return mock(Y).filter(e=>!store.deleted.includes(e.id)).concat(store.added.filter(e=>e.start<=hi && e.end>=lo));
+}
+const visible = e => !state.hidden.has(e.cat) && (state.member==='all' || e.members.includes(state.member));
+const findEvent = id => events(state.year).find(e=>e.id===id);
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const swatch = cat => cat==='holiday' ? '<span class="sw phs">14</span>' : `<span class="sw cat-${cat}${['school','daycare','both','birthday'].includes(cat)?' tint':''}"></span>`;
+const u = v => `calc(var(--cs) * ${+v.toFixed(3)})`;
+const box = (x,y,w,h) => `left:${u(x)};top:${u(y)};width:${u(w)};height:${u(h)}`;
+
+/* ---------- layouts ---------- */
+function layout(Y){
+  if(store.view==='month'){
+    const L=1.35, T=.7;
+    const first = m => dow(iso(Y,m,1));
+    const pos = d => { const m=+d.slice(5,7), col=first(m)+(+d.slice(8))-1; return {track:m, p:col, x:L+col, y:T+m-1}; };
+    let hd = '';
+    for(let c=0;c<37;c++) hd += `<div class="hd wd${c%7>=5?' we':''}" style="${box(L+c,0,1,T)}">${WD[c%7]}</div>`;
+    for(let m=1;m<=12;m++) hd += `<div class="hd mo" style="${box(0,T+m-1,L,1)}">${MONTHS[m-1]}</div>`;
+    return {W:L+37, H:T+12, pos, hd, horiz:true};
+  }
+  const L=.9, HD=.75, GAP=.55, MG=.45;
+  const start = addDays(iso(Y,1,1), -dow(iso(Y,1,1)));
+  const weekOf = d => Math.floor(diff(start,d)/7);
+  const tops = [HD, HD+7+GAP+HD];
+  const mx = {}, wide = [L, L];
+  for(let m=1;m<=12;m++){
+    const h = m>6 ? 1 : 0, last = m===12 ? iso(Y,12,31) : addDays(iso(Y,m+1,1),-1);
+    const w0 = weekOf(iso(Y,m,1)), w1 = weekOf(last);
+    if(m!==1 && m!==7) wide[h] += MG;
+    mx[m] = {x:wide[h], w0, h};
+    wide[h] += w1-w0+1;
+  }
+  const pos = d => { const m=+d.slice(5,7), o=mx[m], w=weekOf(d), r=dow(d); return {track:m*100+w, p:r, x:o.x+w-o.w0, y:tops[o.h]+r}; };
+  let hd = '';
+  tops.forEach(t => { for(let r=0;r<7;r++) hd += `<div class="hd wd${r>=5?' we':''}" style="${box(0,t+r,L*.8,1)}">${WD[r]}</div>`; });
+  for(let m=1;m<=12;m++) hd += `<div class="hd mo" style="${box(mx[m].x+.08,tops[mx[m].h]-HD,3,HD)}">${MONTHS[m-1]}</div>`;
+  return {W:Math.max(...wide), H:tops[1]+7, pos, hd, horiz:false};
+}
+
+/* ---------- header ---------- */
+const $ = id => document.getElementById(id);
+function buildChips(){
+  $('legend').innerHTML = Object.entries(CATS).map(([k,v]) =>
+    `<button class="chip" data-cat="${k}" aria-pressed="${!state.hidden.has(k)}">${swatch(k)}${v}</button>`).join('')
+    + `<span class="chip static" title="Vacances scolaires et crèche fermée le même jour">${swatch('both')}Les deux</span>`;
+  $('who').innerHTML = ['all',...PEOPLE].map(p =>
+    `<button class="chip" data-who="${p}" aria-pressed="${state.member===p}">${p==='all'?'Tous':esc(p)}</button>`).join('');
+  $('view').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.view===store.view));
+}
+$('legend').addEventListener('click', e => { const b=e.target.closest('[data-cat]'); if(!b) return;
+  const k=b.dataset.cat; state.hidden.has(k)?state.hidden.delete(k):state.hidden.add(k); buildChips(); render(); });
+$('who').addEventListener('click', e => { const b=e.target.closest('[data-who]'); if(!b) return; state.member=b.dataset.who; buildChips(); render(); });
+$('view').addEventListener('click', e => { const b=e.target.closest('[data-view]'); if(!b) return; store.view=b.dataset.view; save(); buildChips(); render(); });
+$('prev').onclick = () => { state.year--; closePanel(); render(); };
+$('next').onclick = () => { state.year++; closePanel(); render(); };
+$('reset').onclick = () => { store={added:[],deleted:[],view:store.view}; save(); closePanel(); render(); };
+$('addBtn').onclick = () => { const t=todayIso(); const s = t.startsWith(String(state.year)) ? t : `${state.year}-01-01`; openAdd(s,s); };
+
+/* ---------- render ---------- */
+function render(){
+  const Y = state.year; $('yl').textContent = Y;
+  const lay = layout(Y);
+  const evs = events(Y).filter(visible);
+  const school = state.hidden.has('school') ? [] : (SCHOOL[Y]||[]);
+  const ph = state.hidden.has('holiday') ? {} : publicHolidays(Y);
+  const today = todayIso();
+  const byDay = {}, sc = new Set(), dc = new Set(), bd = new Set(), overflow = new Set();
+  const push = (d,it) => (byDay[d] ||= []).push(it);
+  school.forEach(([n,s,e]) => eachDay(s,e,Y,d => { sc.add(d); push(d,{label:n,cat:'school'}); }));
+  Object.entries(ph).forEach(([d,n]) => push(d,{label:n,cat:'holiday'}));
+  evs.forEach(ev => eachDay(ev.start,ev.end,Y,d => { if(ev.cat==='daycare') dc.add(d); if(ev.cat==='birthday') bd.add(d); push(d,{label:ev.title,cat:ev.cat,id:ev.id}); }));
+  state.byDay = byDay;
+
+  // bar segments: consecutive days that share a track (month row or week column)
+  const segs = [];
+  evs.filter(e => !TINTS.includes(e.cat)).forEach(ev => {
+    let cur = null;
+    eachDay(ev.start,ev.end,Y,d => {
+      const p = lay.pos(d);
+      if(cur && cur.track===p.track && p.p===cur.p1+1){ cur.p1=p.p; cur.t=d; }
+      else { cur = {ev, track:p.track, p0:p.p, p1:p.p, x:p.x, y:p.y, s:d, t:d}; segs.push(cur); }
+    });
+  });
+  const byTrack = {};
+  segs.forEach(s => (byTrack[s.track] ||= []).push(s));
+  Object.values(byTrack).forEach(list => {
+    list.sort((a,b) => a.p0-b.p0 || (b.p1-b.p0)-(a.p1-a.p0));
+    const ends = [];
+    list.forEach(s => {
+      let l = ends.findIndex(x => x < s.p0); if(l<0){ l=ends.length; ends.push(0); }
+      ends[l] = s.p1; s.lane = l;
+      if(l>=LANES) eachDay(s.s,s.t,Y,d=>overflow.add(d));
+    });
+  });
+
+  let h = lay.hd;
+  for(let d=`${Y}-01-01`; d<=`${Y}-12-31`; d=addDays(d,1)){
+    const p = lay.pos(d), w = dow(d);
+    const cls = ['cell'];
+    if(w>=5 || ph[d]) cls.push('we');
+    if(ph[d]) cls.push('ph');
+    if(sc.has(d)) cls.push('sc');
+    if(dc.has(d)) cls.push('dc');
+    if(bd.has(d)) cls.push('bd');
+    if(d.endsWith('-01')) cls.push('first');
+    if(d===today) cls.push('today');
+    let mk = bd.has(d) ? '<span class="cake" aria-hidden="true">🎂</span>' : '';
+    if(overflow.has(d)) mk += '<i class="dot more"></i>';
+    h += `<div class="${cls.join(' ')}" data-d="${d}" style="left:calc(var(--cs) * ${p.x} + 1.5px);top:calc(var(--cs) * ${p.y} + 1.5px)"><span class="dn">${+d.slice(8)}</span>${mk?`<span class="mk">${mk}</span>`:''}</div>`;
+  }
+
+  const T=.3, G=.03, M=.06, E=.05;
+  segs.filter(s => s.lane<LANES).forEach(s => {
+    const len = s.p1-s.p0+1, ca = s.s>s.ev.start, cb = s.t<s.ev.end;
+    const a = ca?0:E, b = cb?0:E, off = 1-M-(s.lane+1)*T-s.lane*G;
+    const st = lay.horiz ? box(s.x+a, s.y+off, len-a-b, T) : box(s.x+off, s.y+a, T, len-a-b);
+    h += `<div class="bar ${lay.horiz?'h':'v'} cat-${s.ev.cat}${ca?' ca':''}${cb?' cb':''}" role="button" tabindex="0" style="${st}" data-id="${s.ev.id}" aria-label="${esc(s.ev.title)}, ${esc(fmtRange(s.ev.start,s.ev.end))}">${esc(s.ev.title)}</div>`;
+  });
+
+  const cv = $('canvas');
+  cv.className = 'canvas ' + (lay.horiz ? 'v-month' : 'v-week');
+  cv.innerHTML = h;
+  state.W = lay.W; state.H = lay.H;
+  fit();
+}
+
+function fit(){
+  const b = $('board'), hint = b.querySelector('.hint');
+  const hh = hint && getComputedStyle(hint).display!=='none' ? hint.offsetHeight+8 : 0;
+  const cs = Math.floor(Math.min((b.clientWidth-24)/state.W, (b.clientHeight-14-hh)/state.H));
+  const v = Math.max(22, Math.min(cs, 80));
+  document.documentElement.style.setProperty('--cs', v+'px');
+  const cv = $('canvas'); cv.style.width = (v*state.W)+'px'; cv.style.height = (v*state.H)+'px';
+}
+window.addEventListener('resize', fit);
+
+/* ---------- tooltip ---------- */
+const tip = $('tip');
+function itemsHtml(d){
+  const items = state.byDay[d] || [];
+  return items.length ? items.map(it=>`<div class="row">${swatch(it.cat)}<span>${esc(it.label)}</span></div>`).join('')
+                      : '<div class="empty-note">Rien de prévu</div>';
+}
+function showTip(d, e){
+  tip.innerHTML = `<b>${esc(cap(fmtShort(d)))}</b>${itemsHtml(d)}`;
+  tip.classList.add('on');
+  const r = tip.getBoundingClientRect();
+  let x = e.clientX+14, y = e.clientY+14;
+  if(x+r.width > innerWidth-8) x = e.clientX-r.width-14;
+  if(y+r.height > innerHeight-8) y = e.clientY-r.height-14;
+  tip.style.left = x+'px'; tip.style.top = y+'px';
+}
+const hideTip = () => tip.classList.remove('on');
+
+/* ---------- pointer: hover, click, drag-to-add ---------- */
+function cellAt(x,y){ for(const el of document.elementsFromPoint(x,y)) if(el.classList && el.classList.contains('cell')) return el; return null; }
+let drag = null;
+function paintSel(){
+  const [a,b] = [drag.a,drag.b].sort();
+  document.querySelectorAll('.cell').forEach(c => c.classList.toggle('sel', c.dataset.d>=a && c.dataset.d<=b));
+}
+const clearSel = () => document.querySelectorAll('.cell.sel').forEach(c=>c.classList.remove('sel'));
+$('board').addEventListener('pointerdown', e => {
+  if(e.button!==0) return;
+  const c = cellAt(e.clientX,e.clientY); if(!c) return;
+  const bar = e.target.closest('.bar');
+  drag = {a:c.dataset.d, b:c.dataset.d, bar:bar?bar.dataset.id:null, moved:false};
+});
+window.addEventListener('pointermove', e => {
+  if(e.pointerType!=='mouse') return;
+  const c = cellAt(e.clientX,e.clientY);
+  if(drag){ if(c && c.dataset.d!==drag.b){ drag.b=c.dataset.d; drag.moved=true; paintSel(); } hideTip(); return; }
+  if(c && !$('panel').contains(e.target)) showTip(c.dataset.d,e); else hideTip();
+});
+window.addEventListener('pointerup', () => {
+  if(!drag) return; const d = drag; drag = null; clearSel();
+  if(d.moved && d.a!==d.b){ const [s,t]=[d.a,d.b].sort(); openAdd(s,t); }
+  else if(d.bar) openEvent(d.bar);
+  else openDay(d.a);
+});
+window.addEventListener('pointercancel', () => { drag=null; clearSel(); });
+$('board').addEventListener('keydown', e => { const b=e.target.closest('.bar'); if(b && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); openEvent(b.dataset.id); } });
+$('board').addEventListener('pointerleave', hideTip);
+
+/* ---------- side panel ---------- */
+const panel = $('panel');
+function openPanel(html){ $('panelBody').innerHTML = html; panel.classList.add('open'); hideTip(); }
+function closePanel(){ panel.classList.remove('open'); }
+$('closePanel').onclick = closePanel;
+document.addEventListener('keydown', e => { if(e.key==='Escape') closePanel(); });
+
+function openDay(d){
+  const items = state.byDay[d] || [];
+  const list = items.length ? `<ul class="items">${items.map(it => it.id
+      ? `<li><button data-open="${it.id}">${swatch(it.cat)}<span>${esc(it.label)}</span></button></li>`
+      : `<li><div>${swatch(it.cat)}<span>${esc(it.label)}</span></div></li>`).join('')}</ul>`
+    : '<p class="nothing">Rien de prévu ce jour-là.</p>';
+  openPanel(`<h2>${esc(cap(fmtLong(d)))}</h2>${list}<button class="btn" data-add="${d}">Ajouter un événement ce jour-là</button>`);
+}
+function openEvent(id){
+  const e = findEvent(id); if(!e) return;
+  const n = span(e.start,e.end);
+  openPanel(`<h2>${esc(e.title)}</h2>
+    <p class="sub">${esc(cap(fmtRange(e.start,e.end)))}</p>
+    <dl class="meta">
+      <dt>Catégorie</dt><dd style="display:flex;gap:.4rem;align-items:center">${swatch(e.cat)}${SINGULAR[e.cat]}</dd>
+      <dt>Durée</dt><dd>${n} ${n>1?'jours':'jour'}</dd>
+      <dt>Qui</dt><dd>${e.members.length===PEOPLE.length?'Toute la famille':esc(e.members.join(', '))}</dd>
+    </dl>
+    <button class="btn danger" data-del="${e.id}">Supprimer l’événement</button>`);
+}
+$('panelBody').addEventListener('click', ev => {
+  const o = ev.target.closest('[data-open]'), a = ev.target.closest('[data-add]'), d = ev.target.closest('[data-del]');
+  if(o) openEvent(o.dataset.open);
+  if(a) openAdd(a.dataset.add, a.dataset.add);
+  if(d){
+    const id = d.dataset.del;
+    if(id.startsWith('m')) store.deleted.push(id); else store.added = store.added.filter(x=>x.id!==id);
+    save(); closePanel(); render();
+  }
+});
+
+/* ---------- add dialog ---------- */
+const dlg = $('dlg');
+$('fCat').innerHTML = EDITABLE.map(k=>`<option value="${k}">${SINGULAR[k]}</option>`).join('');
+$('fMem').insertAdjacentHTML('beforeend', PEOPLE.map(p=>`<label><input type="checkbox" value="${esc(p)}" checked>${esc(p)}</label>`).join(''));
+function openAdd(s,e){
+  closePanel(); hideTip();
+  $('fTitle').value=''; $('fCat').value = s===e ? 'celebration' : 'trip';
+  $('fStart').value=s; $('fEnd').value=e; $('fErr').textContent='';
+  $('fMem').querySelectorAll('input').forEach(i=>i.checked=true);
+  dlg.showModal(); $('fTitle').focus();
+}
+$('cancel').onclick = () => dlg.close();
+$('form').addEventListener('submit', ev => {
+  const title = $('fTitle').value.trim(), s = $('fStart').value, t = $('fEnd').value;
+  const members = [...$('fMem').querySelectorAll('input:checked')].map(i=>i.value);
+  let err = '';
+  if(!title) err = 'Donnez un titre à l’événement.';
+  else if(!s || !t) err = 'Choisissez un premier et un dernier jour.';
+  else if(t < s) err = 'Le dernier jour ne peut pas être avant le premier.';
+  else if(!members.length) err = 'Choisissez au moins une personne.';
+  if(err){ ev.preventDefault(); $('fErr').textContent = err; return; }
+  store.added.push({id:'u'+Date.now(), title, cat:$('fCat').value, start:s, end:t, members});
+  save();
+  const y = +s.slice(0,4); if(y!==state.year && +t.slice(0,4)!==state.year) state.year = y;
+  render();
+});
+
+buildChips();
+render();
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+})();
+</script>
+</body>
+</html>

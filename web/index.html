@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Année en famille</title>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Année en famille</h1>
+    <div class="yearnav">
+      <button id="prev" type="button" aria-label="Année précédente">‹</button>
+      <span id="yl" aria-live="polite"></span>
+      <button id="next" type="button" aria-label="Année suivante">›</button>
+    </div>
+    <div class="seg" id="view" role="group" aria-label="Affichage">
+      <button type="button" data-view="week">Semaines</button>
+      <button type="button" data-view="month">Mois</button>
+    </div>
+  </div>
+  <div class="legend" id="legend" role="group" aria-label="Catégories affichées"></div>
+  <div class="who" id="who" role="group" aria-label="Événements de"></div>
+  <div class="actions">
+    <button class="btn" id="addBtn" type="button">Ajouter un événement</button>
+    <button class="btn ghost" id="printBtn" type="button" aria-expanded="false" aria-controls="printPop">Imprimer</button>
+    <a class="btn ghost" id="settings" href="/reglages">Réglages</a>
+    <form method="post" action="/auth/logout"><button class="btn ghost" id="logout" type="submit">Se déconnecter</button></form>
+    <button class="btn ghost" id="reset" type="button" hidden title="Remet les événements d’exemple de la démonstration.">Réinitialiser la démo</button>
+    <form class="pop" id="printPop" hidden aria-label="Impression">
+      <label class="f">Format
+        <select id="printFormat">
+          <option value="a3" selected>A3 paysage</option>
+          <option value="a4">A4 paysage</option>
+        </select>
+      </label>
+      <div class="dlg-actions">
+        <button type="button" class="btn ghost" id="printCancel">Annuler</button>
+        <button type="submit" class="btn" id="printGo">Imprimer</button>
+      </div>
+    </form>
+  </div>
+</header>
+<div class="print-head" id="printHead">
+  <h1>Année en famille</h1>
+  <span class="print-year" id="printYear"></span>
+  <div class="legend" id="printLegend"></div>
+  <p class="print-filters" id="printFilters" hidden></p>
+</div>
+<div class="banner" id="banner" role="alert" hidden>
+  <span>Impossible de charger l’agenda.</span>
+  <button class="btn sm" id="retry" type="button">Réessayer</button>
+</div>
+<main class="board" id="board">
+  <p class="hint">Tournez votre téléphone pour voir l’année entière.</p>
+  <div class="canvas" id="canvas"></div>
+</main>
+<footer class="print-foot" id="printFoot"></footer>
+<div class="tip" id="tip" role="tooltip"></div>
+<aside class="panel" id="panel" aria-label="Détails">
+  <button class="x" id="closePanel" type="button" aria-label="Fermer">×</button>
+  <div id="panelBody"></div>
+</aside>
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <form id="form" novalidate>
+    <h2 id="dlgTitle">Nouvel événement</h2>
+    <label class="f">Titre<input id="fTitle" maxlength="120" placeholder="ex. Week-end à la maison de la plage"></label>
+    <label class="f">Catégorie<select id="fCat"></select></label>
+    <div class="two" id="fDates">
+      <label class="f">Premier jour<input type="date" id="fStart"></label>
+      <label class="f" id="fEndWrap">Dernier jour<input type="date" id="fEnd"></label>
+    </div>
+    <label class="f" id="fBirthWrap" hidden>Année de naissance<input type="number" id="fBirth" min="1900" step="1" inputmode="numeric" placeholder="facultatif"></label>
+    <fieldset class="mem" id="fMem"><legend>Qui est concerné ?</legend></fieldset>
+    <label class="f">Lieu<input id="fLoc" maxlength="200"></label>
+    <label class="f">Notes<textarea id="fNotes" rows="4" maxlength="2000"></textarea></label>
+    <p class="err" id="fErr" role="alert"></p>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" id="cancel">Annuler</button>
+      <button type="submit" class="btn" id="submit">Ajouter</button>
+    </div>
+  </form>
+</dialog>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

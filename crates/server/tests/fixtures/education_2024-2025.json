@@ -1,0 +1,68 @@
+{
+  "total_count": 7,
+  "results": [
+    {
+      "description": "Vacances de la Toussaint",
+      "population": "-",
+      "start_date": "2024-10-18T22:00:00+00:00",
+      "end_date": "2024-11-03T23:00:00+00:00",
+      "location": "Rennes",
+      "zones": "Zone B",
+      "annee_scolaire": "2024-2025"
+    },
+    {
+      "description": "Vacances de Noël",
+      "population": "-",
+      "start_date": "2024-12-20T23:00:00+00:00",
+      "end_date": "2025-01-05T23:00:00+00:00",
+      "location": "Rennes",
+      "zones": "Zone B",
+      "annee_scolaire": "2024-2025"
+    },
+    {
+      "description": "Vacances d'Hiver",
+      "population": "-",
+      "start_date": "2025-02-07T23:00:00+00:00",
+      "end_date": "2025-02-23T23:00:00+00:00",
+      "location": "Rennes",
+      "zones": "Zone B",
+      "annee_scolaire": "2024-2025"
+    },
+    {
+      "description": "Vacances de Printemps",
+      "population": "-",
+      "start_date": "2025-04-04T22:00:00+00:00",
+      "end_date": "2025-04-21T22:00:00+00:00",
+      "location": "Rennes",
+      "zones": "Zone B",
+      "annee_scolaire": "2024-2025"
+    },
+    {
+      "description": "Pont de l'Ascension",
+      "population": "-",
+      "start_date": "2025-05-28T22:00:00+00:00",
+      "end_date": "2025-06-01T22:00:00+00:00",
+      "location": "Rennes",
+      "zones": "Zone B",
+      "annee_scolaire": "2024-2025"
+    },
+    {
+      "description": "Vacances d'Été",
+      "population": "Élèves",
+      "start_date": "2025-07-04T22:00:00+00:00",
+      "end_date": "2025-08-31T22:00:00+00:00",
+      "location": "Rennes",
+      "zones": "Zone B",
+      "annee_scolaire": "2024-2025"
+    },
+    {
+      "description": "Vacances d'Été",
+      "population": "Enseignants",
+      "start_date": "2025-07-04T22:00:00+00:00",
+      "end_date": "2025-08-28T22:00:00+00:00",
+      "location": "Rennes",
+      "zones": "Zone B",
+      "annee_scolaire": "2024-2025"
+    }
+  ]
+}

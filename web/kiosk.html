@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Année en famille</title>
+</head>
+<body class="kiosk">
+<header class="top">
+  <div class="brand">
+    <h1>Année en famille</h1>
+    <span class="kyear" id="yl"></span>
+  </div>
+  <div class="legend" id="legend" role="list" aria-label="Catégories"></div>
+</header>
+<main class="board" id="board">
+  <div class="canvas" id="canvas"></div>
+</main>
+<div class="offline" id="offline" role="status" hidden></div>
+<div class="tip" id="tip" role="tooltip"></div>
+<aside class="panel" id="panel" aria-label="Détails">
+  <div id="panelBody"></div>
+</aside>
+<script type="module" src="/src/kiosk-main.ts"></script>
+</body>
+</html>
