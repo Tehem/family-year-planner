@@ -167,6 +167,17 @@ test.describe("Catégories", () => {
     await expect(bar(page, "Tournoi de judo")).toBeVisible();
   });
 
+  test("a deleted category's code is not reused by a category added in the same save", async ({ page }) => {
+    await openTypes(page);
+    await page.getByRole("button", { name: "Ajouter une catégorie" }).click();
+    await save(page).click();
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
+    await card(page, "custom_1").getByRole("button", { name: /Supprimer la catégorie/ }).click();
+    await page.getByRole("button", { name: "Ajouter une catégorie" }).click();
+    await expect(card(page, "custom_1")).toHaveCount(0);
+    await expect(card(page, "custom_2")).toHaveCount(1);
+  });
+
   test("at most three added categories", async ({ page }) => {
     await openTypes(page);
     const add = page.getByRole("button", { name: "Ajouter une catégorie" });

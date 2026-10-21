@@ -39,8 +39,12 @@ Family Year Planner: a shared family year planner backed by two Google calendars
 - 'Repères' holds context days: school holidays (type school_holiday, 'Vacances scolaires'), daycare or leisure-centre closures (daycare_closure, 'Fermeture de la crèche ou du centre de loisirs'), birthdays (birthday, 'Anniversaire') and public holidays (public_holiday, 'Jour férié'). School and public holidays are imported automatically and are read-only.\n\
 - 'Famille' holds family events: family_gathering ('Réunion de famille'), family_home ('Séjour en maison de famille'), trip ('Voyage ou vacances'), celebration ('Fête ou cérémonie'). Events of unknown category are 'unclassified' ('Non classé').\n\
 - The family can rename these types and add its own (codes custom_1 to custom_3, written to 'Famille'): get_context returns the current codes, names in French and English, and colors. Always use the codes, never the names.\n\
-Conventions: dates are ISO YYYY-MM-DD in the Europe/Paris time zone and end dates are INCLUSIVE (a trip from 2026-07-25 to 2026-08-02 covers both days). Members are the first names returned by get_context; an empty member list means the whole family. Write titles in French unless the family writes in another language. Birthdays last one day and repeat every year; editing or deleting one occurrence affects the whole series.\n\
+Conventions: dates are ISO YYYY-MM-DD in the Europe/Paris time zone and end dates are INCLUSIVE (a trip from 2026-07-25 to 2026-08-02 covers both days). Members are the first names returned by get_context; an empty member list means the whole family. Write titles in French. Birthdays last one day and repeat every year; editing or deleting one occurrence affects the whole series.\n\
 Call get_context first to learn today's date, the members and the type codes.";
+
+/// The language resolved for an MCP request (the instance default: agents send no cookie).
+#[derive(Debug, Clone, Copy)]
+struct RequestLang(Lang);
 
 /// Who is calling `/mcp`.
 #[derive(Debug, Clone)]
@@ -110,6 +114,8 @@ async fn mcp_auth(State(state): State<AppState>, mut req: Request, next: Next) -
         return too_many();
     }
     req.extensions_mut().insert(auth);
+    // rmcp handles each call in a spawned task, where the task-local language is gone.
+    req.extensions_mut().insert(RequestLang(current()));
     next.run(req).await
 }
 
@@ -251,7 +257,7 @@ pub fn tools(catalog: &TypeCatalog) -> Vec<Tool> {
     let event_fields = |writable_only_types: bool| {
         json!({
             "type": {"type": "string", "enum": type_codes(catalog, writable_only_types), "description": writable_types_description(catalog)},
-            "title": {"type": "string", "maxLength": 120, "description": "Title (the family writes in French by default), 1 to 120 characters."},
+            "title": {"type": "string", "maxLength": 120, "description": "Title in French, 1 to 120 characters."},
             "start": date_prop("First day, YYYY-MM-DD."),
             "end": date_prop("Last day, YYYY-MM-DD, INCLUSIVE (>= start, at most 366 days). Defaults to start. Birthdays last exactly one day."),
             "members": members_prop("First names of the people concerned (from get_context). Empty or omitted = the whole family."),
@@ -320,7 +326,7 @@ pub fn tools(catalog: &TypeCatalog) -> Vec<Tool> {
         .annotate(ro()),
         Tool::new(
             "create_event",
-            "Create an event in the family calendar. The calendar is chosen from the type. Dates are inclusive ISO dates; `end` defaults to `start`. Titles are usually in French. Requires a read-write credential. Returns the created event.",
+            "Create an event in the family calendar. The calendar is chosen from the type. Dates are inclusive ISO dates; `end` defaults to `start`. Titles should be in French. Requires a read-write credential. Returns the created event.",
             schema(json!({
                 "type": "object",
                 "properties": create_props,
@@ -679,10 +685,25 @@ impl ServerHandler for McpServer {
             .and_then(|p| p.extensions.get::<McpAuth>())
             .cloned()
             .ok_or_else(|| McpError::internal_error("missing authentication context", None))?;
+        let lang = context
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|p| p.extensions.get::<RequestLang>())
+            .map_or_else(|| self.state.config.default_lang(), |l| l.0);
         let name = request.name.to_string();
         let args = request.arguments.unwrap_or_default();
         tracing::info!(tool = %name, agent = %auth.name, "mcp tool call");
+        crate::i18n::scoped(lang, self.dispatch(name, args, auth)).await
+    }
+}
 
+impl McpServer {
+    async fn dispatch(
+        &self,
+        name: String,
+        args: Map<String, Value>,
+        auth: McpAuth,
+    ) -> Result<CallToolResponse, McpError> {
         if is_write_tool(&name) && !auth.scope.can_write() {
             return Ok(tool_error(ToolError::new(
                 "insufficient_scope",

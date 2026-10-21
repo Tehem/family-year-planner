@@ -181,7 +181,12 @@ impl Importer {
                 Some(found) => {
                     let keep = &found[0];
                     plan.delete.extend(found[1..].iter().cloned()); // duplicates
-                    if keep.title != d.title || keep.start != d.start || keep.end != d.end {
+                    // A different type means a different color: events written with a stale color heal here.
+                    if keep.title != d.title
+                        || keep.start != d.start
+                        || keep.end != d.end
+                        || keep.kind != d.kind
+                    {
                         plan.update.push((keep.id.clone(), d.clone()));
                     } else {
                         plan.unchanged += 1;

@@ -1074,7 +1074,10 @@ existing events (both calendars, all years, series masters, imported events incl
 2. The final catalog is validated as a whole (unique colors, name lengths, ≤ 3 custom types), so
    two types can **swap** colors in one save. The migration is a single pass that maps each event's
    old `colorId` to its new one, so swaps are safe.
-3. The pass is **resumable**: before starting, the target catalog and a migration id are stored in
+3. User writes and import runs hold a shared guard, the migration an exclusive one: it starts only when the
+   writes in flight are done. The pass runs in a task detached from the HTTP request. The importer compares the
+   type of existing events, so an event written with a stale color heals on the next import.
+   The pass is **resumable**: before starting, the target catalog and a migration id are stored in
    `type_migrations` (status `running`); every patched event gets the private property
    `fy_migration=<id>` and is skipped if it already carries it. On startup a `running` migration is
    resumed. The catalog switches to the new colors only when the pass completes (reads during the
@@ -1119,7 +1122,8 @@ The catalog is kept in memory (`TypeRegistry`) and shared with the calendar stor
 - `PUT /api/admin/types` body `{ "types": [same shape without palette], "dry_run": bool }` — the
   **complete** desired catalog (omitted custom types are deleted; built-ins must all be present).
   Response `{ "changes": [{ "code", "from_color_id", "to_color_id", "events": n }],
-  "orphans": n, "applied": bool }`. Validation failures: `400` with a localized message.
+  "orphans": n, "applied": bool }`; `changes` and `orphans` are computed on a dry run only (they cost a scan
+  of both calendars), an applied save answers `changes: []`. Validation failures: `400` with a localized message.
 - Both are web-session only, members only (not kiosk, not MCP).
 
 ### 19.8 MCP

@@ -6,6 +6,7 @@ pub mod mapping;
 pub mod model;
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -57,6 +58,8 @@ pub struct GoogleStore {
     registry: Arc<TypeRegistry>,
     ttl: Duration,
     cache: Mutex<HashMap<i32, CachedYear>>,
+    /// Bumped by every invalidation: a read that started before it must not fill the cache.
+    generation: AtomicU64,
 }
 
 impl GoogleStore {
@@ -68,6 +71,7 @@ impl GoogleStore {
             registry: Arc::new(TypeRegistry::default()),
             ttl: cfg.cache_ttl,
             cache: Mutex::new(HashMap::new()),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -82,19 +86,24 @@ impl GoogleStore {
     }
 
     fn map(&self, g: &GEvent, cal: CalendarKind) -> Option<Event> {
-        let catalog = self.registry.current();
+        self.map_with(g, cal, &self.registry.current())
+    }
+
+    /// Maps with one catalog snapshot, so that a whole listing is typed consistently.
+    fn map_with(&self, g: &GEvent, cal: CalendarKind, catalog: &TypeCatalog) -> Option<Event> {
         mapping::to_event(
             g,
             cal,
             &MapCtx {
                 tz: self.tz,
                 members: &self.members,
-                catalog: &catalog,
+                catalog,
             },
         )
     }
 
     fn invalidate(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
         self.cache.lock().unwrap().clear();
     }
 
@@ -107,6 +116,7 @@ impl GoogleStore {
         cal: CalendarKind,
         from: NaiveDate,
         to_exclusive: NaiveDate,
+        catalog: &TypeCatalog,
     ) -> StoreResult<Vec<Event>> {
         let params = ListParams {
             time_min: Some(self.rfc3339(from)),
@@ -115,7 +125,10 @@ impl GoogleStore {
             masters: false,
         };
         let raw = self.client.list(cal, &params).await?;
-        Ok(raw.iter().filter_map(|g| self.map(g, cal)).collect())
+        Ok(raw
+            .iter()
+            .filter_map(|g| self.map_with(g, cal, catalog))
+            .collect())
     }
 
     /// Fetch an event and, for an occurrence, its series master.
@@ -248,21 +261,24 @@ impl CalendarStore for GoogleStore {
         {
             return Ok(events.as_ref().clone());
         }
+        let generation = self.generation.load(Ordering::SeqCst);
+        let catalog = self.registry.current();
         let from = annee_domain::dates::ymd(year, 1, 1);
         let to = annee_domain::dates::ymd(year + 1, 1, 1);
         let (reperes, famille) = tokio::join!(
-            self.list_calendar(CalendarKind::Reperes, from, to),
-            self.list_calendar(CalendarKind::Famille, from, to)
+            self.list_calendar(CalendarKind::Reperes, from, to, &catalog),
+            self.list_calendar(CalendarKind::Famille, from, to, &catalog)
         );
         let mut events = reperes?;
         events.extend(famille?);
         events.sort_by(|a, b| {
             (a.start, a.end, a.id.to_string()).cmp(&(b.start, b.end, b.id.to_string()))
         });
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(year, (Instant::now(), Arc::new(events.clone())));
+        // A write or a catalog change during the fetch makes this listing stale: serve it, do not keep it.
+        let mut cache = self.cache.lock().unwrap();
+        if self.generation.load(Ordering::SeqCst) == generation {
+            cache.insert(year, (Instant::now(), Arc::new(events.clone())));
+        }
         Ok(events)
     }
 
@@ -338,7 +354,7 @@ impl CalendarStore for GoogleStore {
             .patch(
                 id.calendar,
                 &id.google_id,
-                &mapping::imported_patch(event),
+                &mapping::imported_patch(event, &self.registry.current()),
                 None,
             )
             .await?;
@@ -357,15 +373,17 @@ impl CalendarStore for GoogleStore {
     }
 
     async fn count_colors(&self) -> StoreResult<BTreeMap<String, usize>> {
+        let (reperes, famille) = tokio::join!(
+            self.client.list(CalendarKind::Reperes, &MASTERS),
+            self.client.list(CalendarKind::Famille, &MASTERS)
+        );
         let mut counts = BTreeMap::new();
-        for cal in [CalendarKind::Reperes, CalendarKind::Famille] {
-            for g in self.client.list(cal, &MASTERS).await? {
-                if g.status.as_deref() == Some("cancelled") {
-                    continue;
-                }
-                if let Some(color) = g.color_id {
-                    *counts.entry(color).or_insert(0) += 1;
-                }
+        for g in reperes?.into_iter().chain(famille?) {
+            if g.status.as_deref() == Some("cancelled") {
+                continue;
+            }
+            if let Some(color) = g.color_id {
+                *counts.entry(color).or_insert(0) += 1;
             }
         }
         Ok(counts)

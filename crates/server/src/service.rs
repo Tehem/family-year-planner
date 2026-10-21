@@ -5,7 +5,7 @@ use annee_domain::validation::{validate_new, validate_update};
 use annee_domain::{
     Event, EventId, EventInput, EventPatch, TypeCatalog, ValidationContext, ValidationError,
 };
-use annee_gcal::DeleteScope;
+use annee_gcal::{DeleteScope, WriteAccess};
 
 use crate::error::ServiceError;
 use crate::i18n;
@@ -24,13 +24,10 @@ impl AppState {
         }
     }
 
-    /// Writes wait while the colors of the types are being migrated (§19.5).
-    fn ensure_writable(&self) -> Result<(), ServiceError> {
-        if self.types.is_migrating() {
-            Err(ServiceError::Migrating)
-        } else {
-            Ok(())
-        }
+    /// Writes wait while the colors of the types are being migrated (§19.5). The guard is held
+    /// for the whole write, so that a migration starts only once the writes in flight are done.
+    fn write_access(&self) -> Result<WriteAccess, ServiceError> {
+        self.types.try_write_access().ok_or(ServiceError::Migrating)
     }
 
     pub async fn events_for_year(&self, year: i32) -> Result<Vec<Event>, ServiceError> {
@@ -44,7 +41,7 @@ impl AppState {
         input: &EventInput,
         writer: &str,
     ) -> Result<Event, ServiceError> {
-        self.ensure_writable()?;
+        let _access = self.write_access()?;
         let members = &self.config.family.members;
         let catalog = self.types.current();
         let new = validate_new(input, &self.validation_context(members, &catalog))?;
@@ -57,7 +54,7 @@ impl AppState {
         patch: &EventPatch,
         writer: &str,
     ) -> Result<Event, ServiceError> {
-        self.ensure_writable()?;
+        let _access = self.write_access()?;
         let id: EventId = id.parse().map_err(|_| ServiceError::BadId)?;
         let existing = self.store.get(&id).await?;
         let members = &self.config.family.members;
@@ -71,7 +68,7 @@ impl AppState {
     }
 
     pub async fn delete_event(&self, id: &str) -> Result<(EventId, DeleteScope), ServiceError> {
-        self.ensure_writable()?;
+        let _access = self.write_access()?;
         let id: EventId = id.parse().map_err(|_| ServiceError::BadId)?;
         let existing = self.store.get(&id).await?;
         if existing.read_only {

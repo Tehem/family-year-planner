@@ -841,3 +841,35 @@ async fn recolor_applies_a_swap_in_one_pass_and_skips_migrated_events() {
         "d is not in the mapping, e already carries the migration id"
     );
 }
+
+#[tokio::test]
+async fn a_listing_that_overlaps_an_invalidation_is_not_cached() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(events_path(REPERES)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(events_path(FAMILLE)))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"items": []}))
+                .set_delay(Duration::from_millis(300)),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let s = Arc::new(store(&server));
+    let first = tokio::spawn({
+        let s = s.clone();
+        async move { s.list_year(2026).await }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The catalog changes while the listing is in flight.
+    s.invalidate_cache();
+    first.await.unwrap().unwrap();
+    // The stale listing was served but not kept: the next call fetches again (both mocks expect 2).
+    s.list_year(2026).await.unwrap();
+}

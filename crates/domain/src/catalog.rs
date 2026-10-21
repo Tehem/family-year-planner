@@ -309,10 +309,6 @@ impl TypeCatalog {
         self.defs.iter().map(|d| d.kind)
     }
 
-    pub fn custom_count(&self) -> usize {
-        self.defs.iter().filter(|d| d.kind.is_custom()).count()
-    }
-
     /// Type for a Google `colorId`. Unknown or missing ids are `Unclassified`.
     pub fn from_color_id(&self, color_id: Option<&str>) -> EventType {
         let Some(id) = color_id else {
@@ -336,24 +332,12 @@ impl TypeCatalog {
         )
     }
 
-    pub fn label_plural(&self, kind: EventType, lang: Lang) -> String {
-        self.get(kind).map_or_else(
-            || kind.code().to_string(),
-            |d| d.labels.get(lang).plural.clone(),
-        )
-    }
-
     /// Colors not used by any type.
     pub fn free_colors(&self) -> Vec<&'static str> {
         COLOR_IDS
             .into_iter()
             .filter(|id| !self.defs.iter().any(|d| d.color_id.as_deref() == Some(id)))
             .collect()
-    }
-
-    /// The first unused custom slot.
-    pub fn next_custom_slot(&self) -> Option<u8> {
-        (1..=MAX_CUSTOM).find(|s| !self.contains(EventType::Custom(*s)))
     }
 
     /// Types as exposed by `GET /api/config`, in `lang`.
@@ -446,9 +430,8 @@ mod tests {
         let c = TypeCatalog::with_overrides(vec![custom(1, "6", "Sport")]).unwrap();
         assert_eq!(c.from_color_id(Some("6")), EventType::Custom(1));
         assert_eq!(c.color_id(EventType::Custom(1)), Some("6"));
-        assert_eq!(c.custom_count(), 1);
+        assert_eq!(c.defs().iter().filter(|d| d.kind.is_custom()).count(), 1);
         assert_eq!(c.free_colors(), vec!["1", "7"]);
-        assert_eq!(c.next_custom_slot(), Some(2));
         let info = c.infos(Lang::En);
         let info = info.iter().find(|i| i.code == "custom_1").unwrap();
         assert!(info.custom && info.writable);
@@ -464,7 +447,6 @@ mod tests {
         ];
         let c = TypeCatalog::with_overrides(three).unwrap();
         assert!(c.free_colors().is_empty());
-        assert_eq!(c.next_custom_slot(), None);
         assert_eq!(
             TypeCatalog::with_overrides(vec![custom(4, "6", "D")]),
             Err(CatalogError::TooManyCustom)

@@ -118,8 +118,12 @@ impl EventType {
     }
 
     pub fn from_code(code: &str) -> Option<Self> {
-        if let Some(slot) = code.strip_prefix("custom_") {
-            return slot.parse::<u8>().ok().and_then(EventType::custom);
+        // Exactly one spelling per type: `custom_01` and `custom_+1` are not codes.
+        match code {
+            "custom_1" => return Some(EventType::Custom(1)),
+            "custom_2" => return Some(EventType::Custom(2)),
+            "custom_3" => return Some(EventType::Custom(3)),
+            _ => {}
         }
         EventType::ALL.into_iter().find(|t| t.code() == code)
     }
@@ -485,6 +489,15 @@ mod tests {
         assert_eq!(EventType::from_code("custom_0"), None);
         assert_eq!(EventType::from_code("custom_4"), None);
         assert_eq!(EventType::from_code("custom_"), None);
+        for spelling in [
+            "custom_01",
+            "custom_+1",
+            "custom_001",
+            "custom_1 ",
+            "Custom_1",
+        ] {
+            assert_eq!(EventType::from_code(spelling), None, "{spelling}");
+        }
     }
 
     #[test]

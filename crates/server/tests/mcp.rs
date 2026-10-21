@@ -748,3 +748,48 @@ async fn custom_types_appear_in_the_context_and_the_tool_schemas_and_can_be_used
     );
     assert_eq!(found["events"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn mcp_uses_the_instance_default_language() {
+    // rmcp runs each tool call in its own task: the language must survive that hop.
+    let mut config = annee_server::config::AppConfig::default();
+    config.app.default_language = "en".into();
+    let state = AppState::demo(
+        config,
+        chrono::NaiveDate::from_ymd_opt(2026, 10, 16),
+        axum_extra::extract::cookie::Key::generate(),
+    )
+    .await
+    .unwrap();
+    let base = spawn_server(state.clone()).await;
+    let client = connect(&base, &pat(&state, "Claude", Scope::ReadWrite).await).await;
+
+    let ctx = structured(&call(&client, "get_context", json!({})).await);
+    let trip = ctx["types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["code"] == "trip")
+        .unwrap()
+        .clone();
+    assert_eq!(trip["label"], "Trip or vacation");
+
+    let r = call(
+        &client,
+        "create_event",
+        json!({"type": "trip", "title": " ", "start": "2026-07-01"}),
+    )
+    .await;
+    assert_eq!(r.is_error, Some(true));
+    assert_eq!(structured(&r)["message"], "Give the event a title.");
+
+    let found = structured(
+        &call(
+            &client,
+            "list_events",
+            json!({"from": "2026-07-14", "to": "2026-07-14", "types": ["public_holiday"]}),
+        )
+        .await,
+    );
+    assert_eq!(found["events"][0]["title"], "Bastille Day");
+}

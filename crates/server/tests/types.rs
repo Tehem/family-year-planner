@@ -183,7 +183,6 @@ async fn renaming_a_type_is_immediate_and_reaches_the_config() {
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
     assert_eq!(r.json()["applied"], true);
-    assert_eq!(r.json()["changes"], json!([]));
     let c = app.get("/api/config").await.json();
     let trip = c["types"]
         .as_array()

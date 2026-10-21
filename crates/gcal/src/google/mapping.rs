@@ -188,9 +188,10 @@ pub fn insert_imported_body(e: &crate::store::ImportedEvent, catalog: &TypeCatal
 }
 
 /// Patch for an imported event whose title or dates changed.
-pub fn imported_patch(e: &crate::store::ImportedEvent) -> Value {
+pub fn imported_patch(e: &crate::store::ImportedEvent, catalog: &TypeCatalog) -> Value {
     json!({
         "summary": e.title,
+        "colorId": catalog.color_id(e.kind),
         "start": {"date": e.start.to_string()},
         "end": {"date": exclusive_from_inclusive(e.end).to_string()},
     })

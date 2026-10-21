@@ -12,7 +12,7 @@ use crate::imports::education::{EducationSource, FixtureEducation, HttpEducation
 use crate::imports::{ImportService, Importer};
 use crate::state::import_service;
 use crate::storage::Db;
-use crate::types_admin::load_catalog;
+use crate::types_admin::{has_unfinished_migration, load_catalog};
 
 /// `annee import [--dry-run]`.
 pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
@@ -20,12 +20,21 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
     let config = load_config(&env)?;
     env.require_prod_secrets(&["GOOGLE_SERVICE_ACCOUNT_FILE"])
         .map_err(|e| anyhow!(e))?;
-    let db = match env.mode {
-        Mode::Demo => Db::memory().await?,
-        Mode::Prod => Db::connect(&env.database_url).await?,
+    // A dry run has no side effect: it does not open (and so does not create or migrate) the
+    // database, and plans with the default type colors.
+    let db = if dry_run {
+        None
+    } else {
+        Some(match env.mode {
+            Mode::Demo => Db::memory().await?,
+            Mode::Prod => Db::connect(&env.database_url).await?,
+        })
     };
     // Imported events take the colors of the configured type catalog (§19).
-    let types = Arc::new(TypeRegistry::new(load_catalog(&db).await));
+    let types = Arc::new(match &db {
+        Some(db) => TypeRegistry::new(load_catalog(db).await),
+        None => TypeRegistry::default(),
+    });
     let (store, education): (Arc<dyn CalendarStore>, Arc<dyn EducationSource>) = match env.mode {
         Mode::Demo => (
             Arc::new(
@@ -44,7 +53,7 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
         .fake_today
         .unwrap_or_else(|| Utc::now().with_timezone(&tz).date_naive());
 
-    if dry_run {
+    let Some(db) = db else {
         let importer = Importer::new(store, education, config.imports.clone(), tz);
         let (counts, lines) = importer.run(today, true).await.map_err(|e| anyhow!(e))?;
         for l in lines {
@@ -55,6 +64,12 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
             counts.created, counts.updated, counts.deleted, counts.unchanged
         );
         return Ok(());
+    };
+    // The server may be rewriting colors (its in-memory flag is not visible from this process).
+    if has_unfinished_migration(&db).await {
+        return Err(anyhow!(
+            "a category color change is unfinished: resume it in Réglages first"
+        ));
     }
 
     let service: Arc<ImportService> =

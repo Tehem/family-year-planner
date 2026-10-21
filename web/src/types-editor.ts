@@ -51,6 +51,13 @@ function namesOk(ty: EditableType): boolean {
   return LANGS.every((l) => [ty.labels[l].singular, ty.labels[l].plural].every((v) => v.trim() !== "" && v.length <= server.max_name));
 }
 
+/** A slot (`custom_1`…) is reusable only when neither the draft nor the saved catalog holds it: a
+ *  deleted type and a new one sharing a code would read as one renamed type (SPEC §19.5). */
+function freeSlot(): number | undefined {
+  const taken = new Set([...draft, ...server.types].map((d) => d.code));
+  return [1, 2, 3].find((n) => !taken.has(`custom_${n}`));
+}
+
 function freeColors(): string[] {
   const used = new Set(draft.map((d) => d.color_id));
   return server.palette.map((p) => p.color_id).filter((c) => !used.has(c));
@@ -149,12 +156,18 @@ function render(): void {
   add.id = "typesAdd";
   const free = freeColors();
   const full = customs >= server.max_custom;
-  add.disabled = full || free.length === 0;
+  add.disabled = full || free.length === 0 || freeSlot() === undefined;
   add.addEventListener("click", addType);
   const note = h(
     "p",
     "muted",
-    full ? t("types.add.max") : free.length === 0 ? t("types.add.none") : t("types.add.free", { n: free.length }),
+    full
+      ? t("types.add.max")
+      : free.length === 0
+        ? t("types.add.none")
+        : freeSlot() === undefined
+          ? t("types.add.saveFirst")
+          : t("types.add.free", { n: free.length }),
   );
 
   const save = h("button", "btn", t("types.save"));
@@ -217,7 +230,7 @@ function status(error?: string, ok?: string): void {
 }
 
 function addType(): void {
-  const slot = [1, 2, 3].find((n) => !draft.some((d) => d.code === `custom_${n}`));
+  const slot = freeSlot();
   const color = freeColors()[0];
   if (!slot || !color) return;
   draft.push({
@@ -269,6 +282,16 @@ async function reload(message?: string): Promise<void> {
   status(undefined, message);
 }
 
+/** Refreshes the banner of an unfinished migration without touching the draft. */
+async function refreshMigration(): Promise<void> {
+  try {
+    server.migration = (await getTypes()).migration;
+    renderMigration();
+  } catch {
+    /* the banner refreshes on the next load */
+  }
+}
+
 async function save_(): Promise<void> {
   if (!dirty() || !valid()) return;
   const btn = byId<HTMLButtonElement>("typesSave");
@@ -310,8 +333,8 @@ function initDialog(): void {
       await reload(t("types.saved"));
     } catch (e) {
       byId("typesDlgErr").textContent = errText(e);
-      // A failed migration blocks editing until resumed: show it.
-      void reload().catch(() => undefined);
+      // A failed migration blocks editing until resumed: show it, but keep the unsaved edits.
+      void refreshMigration();
     } finally {
       yes.disabled = false;
     }

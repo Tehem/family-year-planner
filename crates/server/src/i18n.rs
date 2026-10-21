@@ -26,6 +26,13 @@ pub fn current() -> Lang {
     LANG.try_with(|l| *l).unwrap_or_default()
 }
 
+/// Runs `fut` as if it handled a request in `lang`. Code spawned off the request (rmcp runs each
+/// MCP call in its own task) loses the task-local, so it re-enters the scope with the language
+/// resolved at the HTTP layer.
+pub async fn scoped<F: std::future::Future>(lang: Lang, fut: F) -> F::Output {
+    LANG.scope(lang, fut).await
+}
+
 /// Picks the French or the English text for the current request.
 pub fn tr(fr: &str, en: &str) -> String {
     current().pick(fr, en).to_string()

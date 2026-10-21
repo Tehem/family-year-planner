@@ -63,18 +63,20 @@ async fn types_put(
     ApiJson(body): ApiJson<TypesBody>,
 ) -> Result<Json<Value>, ApiError> {
     let target = catalog_from_input(body.types).map_err(TypeAdminError::from)?;
-    let preview = s.type_admin.preview(&target).await?;
-    if !body.dry_run {
-        s.type_admin.apply(target).await?;
+    if body.dry_run {
+        let preview = s.type_admin.preview(&target).await?;
+        return Ok(Json(
+            json!({"changes": preview.changes, "orphans": preview.orphans, "applied": false}),
+        ));
     }
-    Ok(Json(
-        json!({"changes": preview.changes, "orphans": preview.orphans, "applied": !body.dry_run}),
-    ))
+    // The preview (a full scan of both calendars) is the dry run's job: the page asks for it first.
+    s.type_admin.apply_detached(target).await?;
+    Ok(Json(json!({"changes": [], "orphans": 0, "applied": true})))
 }
 
 /// Resume a color migration left unfinished by a failure.
 async fn types_resume(State(s): State<AppState>, _m: Member) -> Result<Json<Value>, ApiError> {
-    let resumed = s.type_admin.resume().await?;
+    let resumed = s.type_admin.resume_detached().await?;
     Ok(Json(json!({"resumed": resumed})))
 }
 

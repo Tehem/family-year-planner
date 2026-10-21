@@ -106,6 +106,8 @@ pub struct TypeAdmin {
     store: Arc<dyn CalendarStore>,
     /// Serializes `apply`/`resume`.
     lock: Mutex<()>,
+    /// Pause between two attempts of a failing pass (multiplied by the attempt number).
+    retry_delay: Duration,
 }
 
 /// Parses the wire format into a validated catalog.
@@ -164,6 +166,15 @@ pub async fn load_catalog(db: &Db) -> TypeCatalog {
     }
 }
 
+/// Whether a color migration is unfinished in the database (another process may be running it).
+pub async fn has_unfinished_migration(db: &Db) -> bool {
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM type_migrations WHERE status != 'done'")
+        .fetch_one(&db.pool)
+        .await
+        .map(|n| n > 0)
+        .unwrap_or(false)
+}
+
 /// Wire form of a catalog for the editor.
 fn editor_types(catalog: &TypeCatalog) -> Vec<Value> {
     catalog
@@ -187,11 +198,19 @@ impl TypeAdmin {
             registry,
             store,
             lock: Mutex::new(()),
+            retry_delay: Duration::from_secs(2),
         })
     }
 
-    pub fn is_migrating(&self) -> bool {
-        self.registry.is_migrating()
+    /// Same admin with another retry pause (tests).
+    pub fn with_retry_delay(self: Arc<Self>, retry_delay: Duration) -> Arc<Self> {
+        match Arc::try_unwrap(self) {
+            Ok(mut admin) => {
+                admin.retry_delay = retry_delay;
+                Arc::new(admin)
+            }
+            Err(shared) => shared,
+        }
     }
 
     /// Demo only: forget every customization and go back to the default catalog.
@@ -271,21 +290,44 @@ impl TypeAdmin {
         Ok(Preview { changes, orphans })
     }
 
+    /// [`apply`](Self::apply) in a detached task: the migration goes on if the client that asked
+    /// for it disconnects (a dropped handler would leave it half done and writes blocked).
+    pub async fn apply_detached(
+        self: &Arc<Self>,
+        target: TypeCatalog,
+    ) -> Result<(), TypeAdminError> {
+        let this = self.clone();
+        tokio::spawn(async move { this.apply(target).await })
+            .await
+            .map_err(|e| TypeAdminError::Database(format!("migration task: {e}")))?
+    }
+
+    /// [`resume`](Self::resume) in a detached task.
+    pub async fn resume_detached(self: &Arc<Self>) -> Result<bool, TypeAdminError> {
+        let this = self.clone();
+        tokio::spawn(async move { this.resume().await })
+            .await
+            .map_err(|e| TypeAdminError::Database(format!("migration task: {e}")))?
+    }
+
     /// Save `target`: names are applied at once, colors through the migration of §19.5.
     pub async fn apply(&self, target: TypeCatalog) -> Result<(), TypeAdminError> {
         let _guard = self.lock.try_lock().map_err(|_| TypeAdminError::Busy)?;
         let current = self.registry.current();
-        if *current == target {
-            return Ok(());
-        }
         let pending = self.pending().await?;
-        if self.registry.is_migrating() && pending.is_none() {
-            return Err(TypeAdminError::Busy);
-        }
+        // An unfinished migration comes first: only its own target (or `resume`) may go on.
         if let Some(p) = &pending
             && p.target != target
         {
             return Err(TypeAdminError::Pending);
+        }
+        if pending.is_none() {
+            if *current == target {
+                return Ok(());
+            }
+            if self.registry.is_migrating() {
+                return Err(TypeAdminError::Busy);
+            }
         }
         let mapping = current.color_mapping(&target);
         if mapping.is_empty() {
@@ -335,7 +377,8 @@ impl TypeAdmin {
         mapping: &Mapping,
         target: &TypeCatalog,
     ) -> Result<(), TypeAdminError> {
-        self.registry.set_migrating(true);
+        // Blocks new writes and waits for the ones in flight; held until the pass is over.
+        let _access = self.registry.begin_migration().await;
         let mut last_error = None;
         for attempt in 1..=ATTEMPTS {
             match self.store.recolor(id, mapping, target).await {
@@ -353,7 +396,7 @@ impl TypeAdmin {
                     tracing::error!(migration = id, attempt, error = %e, "type migration step failed");
                     last_error = Some(e);
                     if attempt < ATTEMPTS {
-                        tokio::time::sleep(Duration::from_secs(u64::from(attempt) * 2)).await;
+                        tokio::time::sleep(self.retry_delay * attempt).await;
                     }
                 }
             }
@@ -481,6 +524,14 @@ mod tests {
         (admin, registry, demo)
     }
 
+    fn customs(r: &TypeRegistry) -> usize {
+        r.current()
+            .defs()
+            .iter()
+            .filter(|d| d.kind.is_custom())
+            .count()
+    }
+
     fn names(s: &str) -> Names {
         Names {
             singular: s.into(),
@@ -532,7 +583,7 @@ mod tests {
         let (admin, registry, demo) = admin().await;
         let target = with_custom(&registry.current(), 1, "6", "Sport");
         admin.apply(target).await.unwrap();
-        assert_eq!(registry.current().custom_count(), 1);
+        assert_eq!(customs(&registry), 1);
 
         demo.list_year(2026).await.unwrap();
         // An event of the custom type.
@@ -569,7 +620,7 @@ mod tests {
             }]
         );
         admin.apply(target).await.unwrap();
-        assert_eq!(registry.current().custom_count(), 0);
+        assert_eq!(customs(&registry), 0);
         let evs = demo.list_year(2026).await.unwrap();
         assert_eq!(
             evs.iter().find(|e| e.title == "Judo").unwrap().kind,
@@ -623,7 +674,110 @@ mod tests {
         ));
         // Resuming finishes the pending one.
         assert!(admin.resume().await.unwrap());
-        assert_eq!(registry.current().custom_count(), 1);
+        assert_eq!(customs(&registry), 1);
         assert!(!registry.is_migrating());
+    }
+
+    fn recolored_trip(base: &TypeCatalog, color: &str) -> TypeCatalog {
+        let mut defs = base.defs().to_vec();
+        defs.iter_mut()
+            .find(|d| d.kind == EventType::Trip)
+            .unwrap()
+            .color_id = Some(color.into());
+        TypeCatalog::new(defs).unwrap()
+    }
+
+    async fn status(admin: &TypeAdmin) -> String {
+        sqlx::query_scalar("SELECT status FROM type_migrations")
+            .fetch_one(&admin.db.pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_failing_pass_keeps_writes_blocked_and_only_its_own_target_may_go_on() {
+        let (admin, registry, demo) = admin().await;
+        let admin = admin.with_retry_delay(Duration::ZERO);
+        let old = registry.current();
+        let target = recolored_trip(&old, "6");
+
+        demo.set_fail_recolor(true);
+        assert!(matches!(
+            admin.apply(target.clone()).await,
+            Err(TypeAdminError::Store(_))
+        ));
+        assert_eq!(status(&admin).await, "failed");
+        assert!(registry.is_migrating(), "writes stay refused");
+        assert!(registry.try_write_access().is_none());
+        assert_eq!(*registry.current(), *old, "reads keep the old catalog");
+        let described = admin.describe().await.unwrap();
+        assert_eq!(described["migration"]["status"], "failed");
+        assert!(described["migration"]["error"].is_string());
+
+        // Re-submitting the old catalog (a "cancel") or another one is refused, not reported as done.
+        assert!(matches!(
+            admin.apply((*old).clone()).await,
+            Err(TypeAdminError::Pending)
+        ));
+        assert!(matches!(
+            admin.apply(recolored_trip(&old, "7")).await,
+            Err(TypeAdminError::Pending)
+        ));
+
+        // Resuming while the outage lasts fails again; once it is over, the migration completes.
+        assert!(admin.resume().await.is_err());
+        demo.set_fail_recolor(false);
+        assert!(admin.resume().await.unwrap());
+        assert_eq!(*registry.current(), target);
+        assert!(!registry.is_migrating());
+        assert!(registry.try_write_access().is_some());
+        assert_eq!(status(&admin).await, "done");
+        assert!(!admin.resume().await.unwrap(), "nothing left to resume");
+    }
+
+    #[tokio::test]
+    async fn an_unfinished_migration_is_resumed_at_startup() {
+        let (admin, registry, _) = admin().await;
+        let target = recolored_trip(&registry.current(), "6");
+        let mapping = registry.current().color_mapping(&target);
+        admin.record_migration(&target, &mapping).await.unwrap();
+        assert!(has_unfinished_migration(&admin.db).await);
+
+        admin.resume_at_startup().await;
+        assert!(registry.is_migrating(), "writes are refused straight away");
+        for _ in 0..200 {
+            if !registry.is_migrating() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!registry.is_migrating());
+        assert_eq!(*registry.current(), target);
+        assert!(!has_unfinished_migration(&admin.db).await);
+    }
+
+    #[tokio::test]
+    async fn the_detached_apply_survives_the_caller_being_dropped() {
+        let (admin, registry, _) = admin().await;
+        let target = recolored_trip(&registry.current(), "6");
+        let caller = tokio::spawn({
+            let admin = admin.clone();
+            let target = target.clone();
+            async move { admin.apply_detached(target).await }
+        });
+        // Let the request reach its await point, then drop it: the client went away.
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        caller.abort();
+        for _ in 0..200 {
+            if *registry.current() == target && !registry.is_migrating() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(*registry.current(), target);
+        assert!(!registry.is_migrating());
+        assert_eq!(status(&admin).await, "done");
     }
 }

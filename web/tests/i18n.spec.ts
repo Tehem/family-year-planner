@@ -44,7 +44,7 @@ test.describe("languages (SPEC §19.2)", () => {
     await expect(page.locator("#panel")).toContainText("Category");
     await expect(page.locator("#panel")).toContainText("Trip or vacation");
     await expect(page.locator("#panel")).toContainText("Open in Google Calendar");
-    await expect(page.locator("#panel .sub").first()).toContainText(/Sat 21 Feb – Sun 1 Mar 2027|Sat 21 Feb – Sun 1 Mar 2026|21 Feb/);
+    await expect(page.locator("#panel .sub").first()).toContainText(/^Sat,? 21 Feb – Sat,? 28 Feb 2026$/);
     await page.getByRole("button", { name: "Edit" }).click();
     await expect(page.locator("#dlgTitle")).toHaveText("Edit the event");
     await expect(page.getByLabel("Title")).toBeVisible();

@@ -1,6 +1,7 @@
 //! In-memory calendar store seeded with the prototype's sample data (`APP_MODE=demo`).
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use annee_domain::birthday::{age_at, first_occurrence};
@@ -91,6 +92,8 @@ pub struct DemoStore {
     tz: Tz,
     members: Vec<String>,
     registry: Arc<TypeRegistry>,
+    /// Makes `recolor` fail, to exercise the failure paths of a color migration (tests).
+    fail_recolor: AtomicBool,
     inner: Mutex<Inner>,
 }
 
@@ -100,6 +103,7 @@ impl DemoStore {
             tz,
             members,
             registry: Arc::new(TypeRegistry::default()),
+            fail_recolor: AtomicBool::new(false),
             inner: Mutex::new(Inner::default()),
         }
     }
@@ -108,6 +112,11 @@ impl DemoStore {
     pub fn with_registry(mut self, registry: Arc<TypeRegistry>) -> Self {
         self.registry = registry;
         self
+    }
+
+    /// Make every `recolor` fail like an unreachable Google Calendar (tests).
+    pub fn set_fail_recolor(&self, fail: bool) {
+        self.fail_recolor.store(fail, Ordering::SeqCst);
     }
 
     /// Forget every change and start again from the sample data.
@@ -614,6 +623,7 @@ impl CalendarStore for DemoStore {
         st.title = event.title.clone();
         st.start = event.start;
         st.end = event.end;
+        st.kind = event.kind;
         Ok(())
     }
 
@@ -648,6 +658,9 @@ impl CalendarStore for DemoStore {
         mapping: &BTreeMap<String, Option<String>>,
         target: &TypeCatalog,
     ) -> StoreResult<usize> {
+        if self.fail_recolor.load(Ordering::SeqCst) {
+            return Err(StoreError::Upstream("simulated outage".into()));
+        }
         let current = self.registry.current();
         let mut inner = self.inner.lock().unwrap();
         let mut patched = 0;

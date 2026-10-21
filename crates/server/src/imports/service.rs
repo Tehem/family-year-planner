@@ -146,13 +146,14 @@ impl ImportService {
     }
 
     async fn run_locked(&self, trigger: &str) -> Option<ImportRun> {
-        if self.types.is_migrating() {
+        // Held for the whole run: a color migration waits for it, and imports wait for a migration.
+        let Some(_access) = self.types.try_write_access() else {
             tracing::warn!(
                 trigger,
                 "import skipped: the type colors are being migrated"
             );
-            return None;
-        }
+            return self.record_skipped(trigger).await;
+        };
         let id = match self.start_run(trigger).await {
             Ok(id) => id,
             Err(e) => {
@@ -171,6 +172,14 @@ impl ImportService {
         {
             tracing::error!(error = %e, "cannot record the end of the import run");
         }
+        self.recent_runs(1).await.ok().and_then(|mut v| v.pop())
+    }
+
+    /// A run that could not start is still recorded, so that Réglages shows why nothing happened.
+    async fn record_skipped(&self, trigger: &str) -> Option<ImportRun> {
+        let id = self.start_run(trigger).await.ok()?;
+        let msg = "Import ignoré : les catégories sont en cours de modification.".to_string();
+        self.finish_run(id, Err(msg)).await.ok()?;
         self.recent_runs(1).await.ok().and_then(|mut v| v.pop())
     }
 
