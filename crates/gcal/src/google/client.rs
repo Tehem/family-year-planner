@@ -51,6 +51,8 @@ pub struct ListParams {
     pub time_min: Option<String>,
     pub time_max: Option<String>,
     pub private_property: Option<String>,
+    /// Return recurring series as one master event instead of expanding them.
+    pub masters: bool,
 }
 
 impl Client {
@@ -143,7 +145,7 @@ impl Client {
         let mut page: Option<String> = None;
         loop {
             let mut q: Vec<(&str, String)> = vec![
-                ("singleEvents", "true".into()),
+                ("singleEvents", (!p.masters).to_string()),
                 ("showDeleted", "false".into()),
                 ("maxResults", "2500".into()),
             ];

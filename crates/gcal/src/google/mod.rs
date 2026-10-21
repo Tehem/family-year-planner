@@ -5,12 +5,12 @@ pub mod client;
 pub mod mapping;
 pub mod model;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use annee_domain::dates::local_midnight_utc;
-use annee_domain::{CalendarKind, Event, EventId, EventType, NewEvent, Source};
+use annee_domain::{CalendarKind, Event, EventId, EventType, NewEvent, Source, TypeCatalog};
 use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate, SecondsFormat};
 use chrono_tz::Tz;
@@ -20,6 +20,7 @@ use self::client::{ApiError, Client, ListParams};
 use self::mapping::{DatePatch, MapCtx};
 use self::model::GEvent;
 use crate::recurrence::{birthday_series_start, instance_id, shift, yearly_occurrence};
+use crate::registry::TypeRegistry;
 use crate::store::{CalendarStore, DeleteScope, ImportedEvent, StoreError, StoreResult};
 
 pub const GOOGLE_API_BASE: &str = "https://www.googleapis.com";
@@ -53,6 +54,7 @@ pub struct GoogleStore {
     client: Client,
     tz: Tz,
     members: Vec<String>,
+    registry: Arc<TypeRegistry>,
     ttl: Duration,
     cache: Mutex<HashMap<i32, CachedYear>>,
 }
@@ -63,28 +65,42 @@ impl GoogleStore {
             client: Client::new(http, cfg.api_base, auth, cfg.reperes_id, cfg.famille_id),
             tz: cfg.tz,
             members: cfg.members,
+            registry: Arc::new(TypeRegistry::default()),
             ttl: cfg.cache_ttl,
             cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Use a shared, live type catalog (§19.6) instead of the default one.
+    pub fn with_registry(mut self, registry: Arc<TypeRegistry>) -> Self {
+        self.registry = registry;
+        self
+    }
+
+    /// Drop the cached years (the catalog changed, so cached events carry stale types).
+    pub fn clear_cache(&self) {
+        self.invalidate();
     }
 
     pub fn client(&self) -> &Client {
         &self.client
     }
 
-    fn ctx(&self) -> MapCtx<'_> {
-        MapCtx {
-            tz: self.tz,
-            members: &self.members,
-        }
+    fn map(&self, g: &GEvent, cal: CalendarKind) -> Option<Event> {
+        let catalog = self.registry.current();
+        mapping::to_event(
+            g,
+            cal,
+            &MapCtx {
+                tz: self.tz,
+                members: &self.members,
+                catalog: &catalog,
+            },
+        )
     }
 
     fn invalidate(&self) {
         self.cache.lock().unwrap().clear();
-    }
-
-    fn map(&self, g: &GEvent, cal: CalendarKind) -> Option<Event> {
-        mapping::to_event(g, cal, &self.ctx())
     }
 
     fn rfc3339(&self, date: NaiveDate) -> String {
@@ -101,6 +117,7 @@ impl GoogleStore {
             time_min: Some(self.rfc3339(from)),
             time_max: Some(self.rfc3339(to_exclusive)),
             private_property: None,
+            masters: false,
         };
         let raw = self.client.list(cal, &params).await?;
         Ok(raw.iter().filter_map(|g| self.map(g, cal)).collect())
@@ -183,12 +200,14 @@ impl GoogleStore {
             None
         };
         let include_color = new.kind != current.kind || moved_from.is_some();
+        let catalog = self.registry.current();
+        let color = catalog.color_id(new.kind);
         let body = mapping::patch_body(
             &current,
             new,
             writer,
             dates,
-            include_color && new.kind.color_id().is_some(),
+            (include_color && color.is_some()).then_some(color),
         );
         let patched = match self
             .client
@@ -262,7 +281,7 @@ impl CalendarStore for GoogleStore {
             .kind
             .home_calendar()
             .ok_or_else(|| StoreError::Upstream("type has no calendar".into()))?;
-        let body = mapping::insert_body(new, writer, self.tz);
+        let body = mapping::insert_body(new, writer, self.tz, &self.registry.current());
         let created = self.client.insert(cal, &body).await?;
         self.invalidate();
         let mapped = self
@@ -297,6 +316,7 @@ impl CalendarStore for GoogleStore {
                 time_min: Some(self.rfc3339(from)),
                 time_max: Some(self.rfc3339(to + chrono::Duration::days(1))),
                 private_property: Some(format!("{}={}", mapping::KEY_SOURCE, src.as_str())),
+                masters: false,
             };
             let raw = self.client.list(CalendarKind::Reperes, &params).await?;
             out.extend(
@@ -309,7 +329,10 @@ impl CalendarStore for GoogleStore {
 
     async fn create_imported(&self, event: &ImportedEvent) -> StoreResult<()> {
         self.client
-            .insert(CalendarKind::Reperes, &mapping::insert_imported_body(event))
+            .insert(
+                CalendarKind::Reperes,
+                &mapping::insert_imported_body(event, &self.registry.current()),
+            )
             .await?;
         self.invalidate();
         Ok(())
@@ -333,4 +356,61 @@ impl CalendarStore for GoogleStore {
         self.invalidate();
         Ok(())
     }
+
+    async fn count_colors(&self) -> StoreResult<BTreeMap<String, usize>> {
+        let mut counts = BTreeMap::new();
+        for cal in [CalendarKind::Reperes, CalendarKind::Famille] {
+            for g in self.client.list(cal, &MASTERS).await? {
+                if g.status.as_deref() == Some("cancelled") {
+                    continue;
+                }
+                if let Some(color) = g.color_id {
+                    *counts.entry(color).or_insert(0) += 1;
+                }
+            }
+        }
+        Ok(counts)
+    }
+
+    async fn recolor(
+        &self,
+        migration_id: &str,
+        mapping: &BTreeMap<String, Option<String>>,
+        _target: &TypeCatalog,
+    ) -> StoreResult<usize> {
+        let mut patched = 0;
+        let outcome = async {
+            for cal in [CalendarKind::Reperes, CalendarKind::Famille] {
+                for g in self.client.list(cal, &MASTERS).await? {
+                    let (Some(id), Some(old)) = (g.id.as_deref(), g.color_id.as_deref()) else {
+                        continue;
+                    };
+                    if g.status.as_deref() == Some("cancelled")
+                        || g.private(mapping::KEY_MIGRATION) == Some(migration_id)
+                    {
+                        continue;
+                    }
+                    let Some(new) = mapping.get(old) else {
+                        continue;
+                    };
+                    let body = mapping::recolor_patch(migration_id, new.as_deref());
+                    self.client.patch(cal, id, &body, None).await?;
+                    patched += 1;
+                }
+            }
+            Ok::<(), StoreError>(())
+        }
+        .await;
+        // Whatever happened, events were rewritten: never serve stale types.
+        self.invalidate();
+        outcome.map(|()| patched)
+    }
 }
+
+/// List every event of a calendar once (series as masters), whatever its date.
+const MASTERS: ListParams = ListParams {
+    time_min: None,
+    time_max: None,
+    private_property: None,
+    masters: true,
+};

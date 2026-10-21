@@ -1,16 +1,17 @@
 //! In-memory calendar store seeded with the prototype's sample data (`APP_MODE=demo`).
 
-use std::collections::HashSet;
-use std::sync::Mutex;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use annee_domain::birthday::{age_at, first_occurrence};
 use annee_domain::dates::{easter, public_holidays, year_bounds, ymd};
-use annee_domain::{CalendarKind, Event, EventId, EventType, NewEvent, Source};
+use annee_domain::{CalendarKind, Event, EventId, EventType, NewEvent, Source, TypeCatalog};
 use async_trait::async_trait;
 use chrono::{Datelike, Duration, NaiveDate};
 use chrono_tz::Tz;
 
 use crate::recurrence::{birthday_series_start, instance_id, shift, yearly_occurrence};
+use crate::registry::TypeRegistry;
 use crate::store::{CalendarStore, DeleteScope, ImportedEvent, StoreError, StoreResult};
 
 /// Year in which demo birthday series start (any displayed year shows them).
@@ -89,6 +90,7 @@ struct Inner {
 pub struct DemoStore {
     tz: Tz,
     members: Vec<String>,
+    registry: Arc<TypeRegistry>,
     inner: Mutex<Inner>,
 }
 
@@ -97,8 +99,15 @@ impl DemoStore {
         DemoStore {
             tz,
             members,
+            registry: Arc::new(TypeRegistry::default()),
             inner: Mutex::new(Inner::default()),
         }
+    }
+
+    /// Use a shared, live type catalog (§19.6) instead of the default one.
+    pub fn with_registry(mut self, registry: Arc<TypeRegistry>) -> Self {
+        self.registry = registry;
+        self
     }
 
     /// Forget every change and start again from the sample data.
@@ -620,6 +629,43 @@ impl CalendarStore for DemoStore {
             Ok(())
         }
     }
+
+    async fn count_colors(&self) -> StoreResult<BTreeMap<String, usize>> {
+        let catalog = self.registry.current();
+        let inner = self.inner.lock().unwrap();
+        let mut counts = BTreeMap::new();
+        for st in &inner.events {
+            if let Some(color) = catalog.color_id(st.kind) {
+                *counts.entry(color.to_string()).or_insert(0) += 1;
+            }
+        }
+        Ok(counts)
+    }
+
+    async fn recolor(
+        &self,
+        _migration_id: &str,
+        mapping: &BTreeMap<String, Option<String>>,
+        target: &TypeCatalog,
+    ) -> StoreResult<usize> {
+        let current = self.registry.current();
+        let mut inner = self.inner.lock().unwrap();
+        let mut patched = 0;
+        for st in &mut inner.events {
+            let Some(old) = current.color_id(st.kind) else {
+                continue;
+            };
+            let Some(new) = mapping.get(old) else {
+                continue;
+            };
+            st.kind = target.from_color_id(new.as_deref());
+            if let Some(home) = st.kind.home_calendar() {
+                st.calendar = home;
+            }
+            patched += 1;
+        }
+        Ok(patched)
+    }
 }
 
 #[cfg(test)]
@@ -637,9 +683,12 @@ mod tests {
     }
 
     fn ctx(m: &[String]) -> ValidationContext<'_> {
+        static CATALOG: std::sync::LazyLock<TypeCatalog> =
+            std::sync::LazyLock::new(TypeCatalog::default);
         ValidationContext {
             members: m,
             today: ymd(2026, 10, 16),
+            catalog: &CATALOG,
         }
     }
 
@@ -919,5 +968,78 @@ mod tests {
         assert_eq!(ids.len(), n);
         assert!(evs.iter().any(|e| e.title == "Noël"));
         assert!(evs.windows(2).all(|w| w[0].start <= w[1].start));
+    }
+
+    #[tokio::test]
+    async fn recolor_swaps_and_clears_types() {
+        use annee_domain::{Labels, Names, TypeDef};
+        let registry = Arc::new(TypeRegistry::default());
+        let s = DemoStore::new(
+            chrono_tz::Europe::Paris,
+            ["Alex", "Camille", "Sacha", "Noé"]
+                .map(String::from)
+                .to_vec(),
+        )
+        .with_registry(registry.clone());
+        s.list_year(2026).await.unwrap(); // seeds the year
+        let counts = s.count_colors().await.unwrap();
+        assert!(counts.contains_key("9") && counts.contains_key("5"));
+        assert!(!counts.contains_key("6"));
+
+        // A custom type on color 6 with one event, then swap trip/gathering and delete the custom type.
+        let n = |t: &str| Names {
+            singular: t.into(),
+            plural: t.into(),
+        };
+        let custom = TypeDef {
+            kind: EventType::Custom(1),
+            color_id: Some("6".into()),
+            labels: Labels {
+                fr: n("Sport"),
+                en: n("Sport"),
+            },
+        };
+        registry.set(TypeCatalog::with_overrides(vec![custom]).unwrap());
+        let mut new = new_event("trip", "Judo", "2026-04-01", "2026-04-01");
+        new.kind = EventType::Custom(1);
+        s.create(&new, "Alex").await.unwrap();
+
+        let mut trip = registry.current().get(EventType::Trip).unwrap().clone();
+        let mut gathering = registry
+            .current()
+            .get(EventType::FamilyGathering)
+            .unwrap()
+            .clone();
+        (trip.color_id, gathering.color_id) = (gathering.color_id.clone(), trip.color_id.clone());
+        let mut defs = TypeCatalog::with_overrides(vec![trip, gathering])
+            .unwrap()
+            .defs()
+            .to_vec();
+        defs.retain(|d| d.kind != EventType::Custom(1));
+        let target = TypeCatalog::new(defs).unwrap();
+        let mapping = registry.current().color_mapping(&target);
+        let before = s.list_year(2026).await.unwrap();
+        let trips = before.iter().filter(|e| e.kind == EventType::Trip).count();
+        let gatherings = before
+            .iter()
+            .filter(|e| e.kind == EventType::FamilyGathering)
+            .count();
+        s.recolor("m", &mapping, &target).await.unwrap();
+        registry.set(target);
+        let after = s.list_year(2026).await.unwrap();
+        // Event types never change in a swap: only their colors (held by the catalog) do.
+        assert_eq!(
+            after.iter().filter(|e| e.kind == EventType::Trip).count(),
+            trips
+        );
+        assert_eq!(
+            after
+                .iter()
+                .filter(|e| e.kind == EventType::FamilyGathering)
+                .count(),
+            gatherings
+        );
+        let judo = after.iter().find(|e| e.title == "Judo").unwrap();
+        assert_eq!(judo.kind, EventType::Unclassified);
     }
 }

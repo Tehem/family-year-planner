@@ -972,3 +972,187 @@ Each milestone ends with green checks, a commit and a `docs/PROGRESS.md` entry.
 - [ ] Imports are idempotent and never touch manual events.
 - [ ] `docs/SETUP.md` matches the implementation (names, paths, variables, routes).
 - [ ] `docs/DECISIONS.md` lists every choice made where the spec was silent.
+
+---
+
+## 19. V1.1 — Languages and configurable types
+
+Requested evolution. Where this section contradicts §1–§18, **this section wins**.
+
+### 19.1 Goals
+
+1. The interface exists in **French (default) and English**.
+2. Every event type can be **renamed** and **recolored**; the color is a Google Calendar `colorId`.
+3. Users can **add types**, within the colors Google Calendar still has free.
+
+### 19.2 Languages
+
+- `Lang` = `fr` | `en`. New config key `[app] default_language = "fr"` (`"fr"` or `"en"`).
+- The language is **per browser**: cookie `annee_lang` (`fr`/`en`, one year, `SameSite=Lax`, not
+  `HttpOnly`, set by the front-end). Without a cookie the instance default applies; the browser's
+  `Accept-Language` is deliberately ignored. `GET /kiosk?lang=en` and `GET /connexion?lang=en`
+  set the cookie too (the wall tablet cannot switch language by itself).
+- The header (main screen, Réglages, login) shows a small `FR | EN` switch (`.seg`). Switching
+  sets the cookie and reloads the page in place.
+- Localized: every front-end string (main screen, dialog, panel, Réglages, kiosk, print, login),
+  server-rendered pages (consent, errors), API and MCP error messages, validation messages, date
+  formatting (`fr-FR` / `en-GB`, 24-hour times), `<html lang>`, page titles, `aria-label`s, the
+  product title (`Année en famille` / `Family year`).
+- API and MCP error messages follow the request language (cookie, else default). MCP requests have no
+  cookie: they use the instance default language. Error **codes** stay English.
+- Imported events keep the French title stored in Google Calendar, but are **translated at read
+  time** for display: public holidays by their stable key (`fy_source_id` `ferie:YYYY-MM-DD`),
+  school holidays by the normalized slug of the dataset description. Unknown titles are shown as
+  stored. User-written titles are never translated.
+- Person names, event titles, places and notes are user data and are not translated.
+- Type names are user-editable in both languages (§19.3).
+
+### 19.3 Type catalog
+
+The fixed table of §4.2 becomes the **default catalog**. The effective catalog is the defaults
+overridden by the database (`type_settings`, §19.6).
+
+| Property | Built-in types | Custom types |
+|---|---|---|
+| Codes | the nine codes of §4.2 | `custom_1`, `custom_2`, `custom_3` (slot, reused after deletion) |
+| Names (singular + plural, FR + EN) | editable | editable, required |
+| Color (`colorId` 1–11) | editable, except `unclassified` (none) | required, editable |
+| Calendar, rendering, writable, busy | fixed (§4.2, §5.5, §5.6) | Famille, bar, writable, busy |
+| Delete | no | yes |
+
+Rules:
+
+- A `colorId` is used by **at most one type** (§4.2 still holds). Google offers 11 event colors,
+  the 8 colored built-in types use 8, so **at most 3 custom types** exist. The UI states how many
+  colors remain free.
+- Names: 1–60 characters after trimming; every type (built-in or custom) has four names:
+  singular and plural, in French and in English. Default names are the French labels of §4.2 and their English equivalents (`defaults` below).
+- Renaming never touches Google Calendar. Behaviour attached to a built-in type (imports,
+  birthday rules, "closure" tints, public-holiday rendering, `makes_busy`) follows its **code**,
+  not its name or color.
+- An event whose `colorId` maps to no type is `unclassified` (unchanged).
+
+English default names (singular / plural):
+
+| Code | English singular | English plural |
+|---|---|---|
+| `school_holiday` | School holiday | School holidays |
+| `daycare_closure` | Daycare or leisure-centre closure | Daycare / leisure closed |
+| `birthday` | Birthday | Birthdays |
+| `public_holiday` | Public holiday | Public holidays |
+| `family_gathering` | Family gathering | Family gatherings |
+| `family_home` | Stay at a family home | Family homes |
+| `trip` | Trip or vacation | Trips & vacations |
+| `celebration` | Party or ceremony | Parties & ceremonies |
+| `unclassified` | Unclassified | Unclassified |
+
+### 19.4 Colors
+
+Google's 11 event colors (name FR / EN): 1 Lavande / Lavender, 2 Sauge / Sage, 3 Raisin / Grape,
+4 Flamant / Flamingo, 5 Banane / Banana, 6 Mandarine / Tangerine, 7 Paon / Peacock,
+8 Graphite / Graphite, 9 Myrtille / Blueberry, 10 Basilic / Basil, 11 Tomate / Tomato.
+
+The app keeps its own palette keyed by `colorId` (`web/src/palette.ts`): for each id, a **bar color**
+and a **tint color**, each in light and dark. The defaults for ids 2, 3, 4, 5, 9, 10, 11 reproduce
+the prototype's colors exactly (so the default catalog renders identically, visual diff 0 %);
+ids 1, 6, 7, 8 get new values in the same family. A type's rendering takes its color from the palette
+entry of its current `colorId`: bar types use the bar color, tint types (`school_holiday`,
+`daycare_closure`, `birthday`) use the tint color. `public_holiday` keeps the weekend tint with a
+red day number whatever its color; the "both closed" orange tint is fixed. `unclassified` is
+always grey.
+
+### 19.5 Changing a color: migration
+
+Google Calendar is the source of truth, so changing a type's `colorId` rewrites `colorId` on its
+existing events (both calendars, all years, series masters, imported events included):
+
+1. `PUT /api/admin/types` with `dry_run: true` returns, for each type whose color changes, the
+   number of existing events concerned; the UI shows it in a confirmation
+   (`23 événements seront recolorés dans Google Agenda.`). When the chosen color is currently used
+   by events of **no** type (e.g. an old event colored Tangerine), the count of those events that
+   will become that type is shown too.
+2. The final catalog is validated as a whole (unique colors, name lengths, ≤ 3 custom types), so
+   two types can **swap** colors in one save. The migration is a single pass that maps each event's
+   old `colorId` to its new one, so swaps are safe.
+3. The pass is **resumable**: before starting, the target catalog and a migration id are stored in
+   `type_migrations` (status `running`); every patched event gets the private property
+   `fy_migration=<id>` and is skipped if it already carries it. On startup a `running` migration is
+   resumed. The catalog switches to the new colors only when the pass completes (reads during the
+   pass use the old catalog). Writes through the app are refused with `409`
+   (`Les catégories sont en cours de modification. Réessayez dans un instant.`) while a migration
+   runs.
+4. Deleting a custom type clears the `colorId` of its events (they become `unclassified`), after a
+   confirmation showing the count.
+5. Demo store: no Google call; the catalog change takes effect immediately (events keep their type).
+6. Name-only changes are applied immediately, without migration.
+
+### 19.6 Persistence
+
+```sql
+CREATE TABLE type_settings (
+  code TEXT PRIMARY KEY,                 -- built-in code or custom_N
+  color_id TEXT,                         -- '1'..'11', NULL for unclassified
+  label_fr TEXT NOT NULL, label_plural_fr TEXT NOT NULL,
+  label_en TEXT NOT NULL, label_plural_en TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE type_migrations (
+  id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT,
+  status TEXT NOT NULL CHECK (status IN ('running','done','failed')),
+  target TEXT NOT NULL,                  -- JSON: the full target catalog
+  mapping TEXT NOT NULL,                 -- JSON: { "<old colorId>": "<new colorId>|null" }
+  total INTEGER, patched INTEGER, error TEXT
+);
+```
+
+A row exists only for types the user changed (defaults otherwise); custom types always have a row.
+The catalog is kept in memory (`TypeRegistry`) and shared with the calendar store.
+
+### 19.7 API changes
+
+- `GET /api/config` also returns `lang`, `default_language`, and `types` localized in `lang`:
+  `TypeInfo` gains `color_id` (`string|null`) and `custom` (bool); `label` / `label_plural` are in
+  the request language.
+- `GET /api/admin/types` →
+  `{ "palette": [{ "color_id", "name_fr", "name_en" }], "max_custom": 3,
+     "types": [{ "code", "custom", "color_id", "labels": { "fr": {"singular","plural"}, "en": {…} } }] }`
+- `PUT /api/admin/types` body `{ "types": [same shape without palette], "dry_run": bool }` — the
+  **complete** desired catalog (omitted custom types are deleted; built-ins must all be present).
+  Response `{ "changes": [{ "code", "from_color_id", "to_color_id", "events": n }],
+  "orphans": n, "applied": bool }`. Validation failures: `400` with a localized message.
+- Both are web-session only, members only (not kiosk, not MCP).
+
+### 19.8 MCP
+
+- `get_context` returns, for each type: `code`, `label` (instance default language), `labels`
+  (`{fr, en}`), `calendar`, `writable`, `color_id`, `custom`. Tool and parameter names stay
+  English; the `type` parameter accepts any code of the current catalog (custom codes included);
+  tool descriptions stay English and say that the list of valid types is returned by
+  `get_context`. `instructions` mention that types are configurable.
+- Titles of imported events are localized like in the API (§19.2).
+
+### 19.9 Réglages
+
+A new section **Catégories** (EN: *Categories*) above *Accès des agents*: one row per type with
+its four names (FR/EN, singular/plural), a color select (swatch + localized Google color name,
+duplicates flagged, `Save` disabled while invalid), a `Delete` button on custom types, and
+`Ajouter une catégorie` while fewer than 3 exist (`Il reste {n} couleur(s) libre(s) dans Google
+Agenda` is shown; at 3 custom types the button is disabled with an explanation). `Enregistrer`
+runs the dry run, shows the confirmation when events are concerned, then applies.
+
+### 19.10 Edge cases
+
+- The legend, filters, event dialog select and panel use the localized plural/singular labels;
+  custom types appear after the built-in bar types and are filterable like the others.
+- Print and kiosk use the same palette and labels.
+- The event dialog default category rules (§8.6) refer to `celebration` / `trip` by code.
+- A custom type's chip, bar and panel entries have no special behaviour.
+
+### 19.11 Milestones
+
+| # | Milestone | Done when |
+|---|---|---|
+| M11 | Catalog core | `TypeCatalog`/`Lang` in `domain`; stores use the catalog; localized validation; migration tables; unit tests. |
+| M12 | Server | `TypeRegistry`, `type_settings`, language resolution, localized errors/pages/imports, `/api/admin/types` with resumable migration, MCP changes; integration tests. |
+| M13 | Front-end | i18n dictionaries, language switch, palette, dynamic categories, Catégories section, print/kiosk; Playwright (FR identical to before, EN covered, catalog editing). |
+| M14 | Docs | SPEC/SETUP/DECISIONS/PROGRESS aligned. |

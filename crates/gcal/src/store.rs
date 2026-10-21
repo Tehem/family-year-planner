@@ -1,7 +1,9 @@
 //! The `CalendarStore` abstraction: everything Google-specific hides behind this trait so that the
 //! in-memory demo store and the Google store are interchangeable.
 
-use annee_domain::{Event, EventId, EventType, NewEvent, Source};
+use std::collections::BTreeMap;
+
+use annee_domain::{Event, EventId, EventType, NewEvent, Source, TypeCatalog};
 use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate};
 use chrono_tz::Tz;
@@ -72,6 +74,22 @@ pub trait CalendarStore: Send + Sync {
     async fn create_imported(&self, event: &ImportedEvent) -> StoreResult<()>;
     async fn update_imported(&self, id: &EventId, event: &ImportedEvent) -> StoreResult<()>;
     async fn delete_imported(&self, id: &EventId) -> StoreResult<()>;
+
+    /// Number of events per Google `colorId` over both calendars and all years (a recurring
+    /// series counts once). Events without a color are not counted. Used to preview §19.5.
+    async fn count_colors(&self) -> StoreResult<BTreeMap<String, usize>>;
+
+    /// Rewrite the color of existing events (§19.5): every event whose `colorId` is a key of
+    /// `mapping` gets the mapped one (`None` clears it). One pass, so permutations are safe; events
+    /// already tagged with `migration_id` are skipped, which makes the pass resumable. `target` is
+    /// the catalog after the change (the demo store has no colors and re-derives types from it).
+    /// Returns the number of events rewritten.
+    async fn recolor(
+        &self,
+        migration_id: &str,
+        mapping: &BTreeMap<String, Option<String>>,
+        target: &TypeCatalog,
+    ) -> StoreResult<usize>;
 
     /// Events overlapping `[from, to]`, sorted by start (then title), without duplicates.
     async fn list_range(&self, from: NaiveDate, to: NaiveDate) -> StoreResult<Vec<Event>> {

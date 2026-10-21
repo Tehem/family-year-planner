@@ -4,6 +4,8 @@ use chrono::{Datelike, NaiveDate, NaiveTime};
 use serde::{Deserialize, Deserializer};
 
 use crate::birthday::birth_date_possible;
+use crate::catalog::TypeCatalog;
+use crate::lang::Lang;
 use crate::types::{Event, EventType};
 
 pub const MAX_TITLE: usize = 120;
@@ -46,6 +48,41 @@ pub enum ValidationError {
 }
 
 impl ValidationError {
+    /// The message in `lang` (the `Display` text is the French one).
+    pub fn message(&self, lang: Lang) -> String {
+        if lang == Lang::Fr {
+            return self.to_string();
+        }
+        match self {
+            ValidationError::TitleRequired => "Give the event a title.".into(),
+            ValidationError::TitleTooLong => {
+                "The title is too long (120 characters maximum).".into()
+            }
+            ValidationError::InvalidDates => "Choose a first and a last day.".into(),
+            ValidationError::EndBeforeStart => {
+                "The last day cannot be before the first day.".into()
+            }
+            ValidationError::SpanTooLong => "An event cannot last more than a year.".into(),
+            ValidationError::TypeNotWritable => {
+                "This type of event cannot be created by hand.".into()
+            }
+            ValidationError::BirthdaySingleDay => "A birthday lasts a single day.".into(),
+            ValidationError::UnknownMember(n) => format!("Unknown person: {n}."),
+            ValidationError::InvalidBirthYear => "Invalid birth year.".into(),
+            ValidationError::ReadOnly => {
+                "This event is imported automatically and cannot be modified.".into()
+            }
+            ValidationError::TypeRequired => "Choose a category.".into(),
+            ValidationError::UnknownType(c) => format!("Unknown category: {c}."),
+            ValidationError::LocationTooLong => {
+                "The place is too long (200 characters maximum).".into()
+            }
+            ValidationError::NotesTooLong => {
+                "The notes are too long (2000 characters maximum).".into()
+            }
+        }
+    }
+
     /// Stable English code for API and MCP errors.
     pub fn code(&self) -> &'static str {
         match self {
@@ -60,6 +97,7 @@ impl ValidationError {
 pub struct ValidationContext<'a> {
     pub members: &'a [String],
     pub today: NaiveDate,
+    pub catalog: &'a TypeCatalog,
 }
 
 /// Raw input of `POST /api/events` and the MCP `create_event` tool.
@@ -247,8 +285,9 @@ fn finish(
     })
 }
 
-fn parse_kind(code: &str) -> Result<EventType, ValidationError> {
+fn parse_kind(code: &str, catalog: &TypeCatalog) -> Result<EventType, ValidationError> {
     EventType::from_code(code.trim())
+        .filter(|k| catalog.contains(*k))
         .ok_or_else(|| ValidationError::UnknownType(code.trim().to_string()))
 }
 
@@ -257,7 +296,10 @@ pub fn validate_new(
     input: &EventInput,
     ctx: &ValidationContext,
 ) -> Result<NewEvent, ValidationError> {
-    let kind = parse_kind(input.kind.as_deref().ok_or(ValidationError::TypeRequired)?)?;
+    let kind = parse_kind(
+        input.kind.as_deref().ok_or(ValidationError::TypeRequired)?,
+        ctx.catalog,
+    )?;
     let start = input.start.as_deref().and_then(parse_date);
     // A missing end defaults to the start (single-day event); a present but invalid one is an error.
     let end = match input.end.as_deref() {
@@ -289,7 +331,7 @@ pub fn validate_update(
         return Err(ValidationError::ReadOnly);
     }
     let (kind, kind_given) = match patch.kind.as_deref() {
-        Some(code) => (parse_kind(code)?, true),
+        Some(code) => (parse_kind(code, ctx.catalog)?, true),
         None => (existing.kind, false),
     };
     let title = patch.title.as_deref().unwrap_or(&existing.title);
@@ -340,9 +382,12 @@ mod tests {
     }
 
     fn ctx(m: &[String]) -> ValidationContext<'_> {
+        static CATALOG: std::sync::LazyLock<TypeCatalog> =
+            std::sync::LazyLock::new(TypeCatalog::default);
         ValidationContext {
             members: m,
             today: ymd(2026, 10, 16),
+            catalog: &CATALOG,
         }
     }
 
