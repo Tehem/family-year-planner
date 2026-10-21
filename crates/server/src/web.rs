@@ -57,6 +57,6 @@ pub fn template(path: &str) -> Option<String> {
 }
 
 /// Fallback when the front-end bundle has not been built.
-pub const FALLBACK_TEMPLATE: &str = "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\">\
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Année en famille</title></head>\
+pub const FALLBACK_TEMPLATE: &str = "<!doctype html><html lang=\"<!--LANG-->\"><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title><!--TITLE--></title></head>\
 <body><main><!--BODY--></main></body></html>";

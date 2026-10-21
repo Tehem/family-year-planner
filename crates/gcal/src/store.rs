@@ -36,6 +36,15 @@ impl DeleteScope {
     }
 }
 
+/// What a color migration did to the events (§19.5).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RecolorReport {
+    /// Events whose color was rewritten.
+    pub patched: usize,
+    /// Events Google refused to patch (not retryable): left as they were, and logged.
+    pub skipped: usize,
+}
+
 /// An event written by the import job (read-only for users).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedEvent {
@@ -83,13 +92,14 @@ pub trait CalendarStore: Send + Sync {
     /// `mapping` gets the mapped one (`None` clears it). One pass, so permutations are safe; events
     /// already tagged with `migration_id` are skipped, which makes the pass resumable. `target` is
     /// the catalog after the change (the demo store has no colors and re-derives types from it).
-    /// Returns the number of events rewritten.
+    /// An event that Google permanently refuses to patch is skipped, not fatal: one event the
+    /// service account cannot modify must not freeze the whole calendar.
     async fn recolor(
         &self,
         migration_id: &str,
         mapping: &BTreeMap<String, Option<String>>,
         target: &TypeCatalog,
-    ) -> StoreResult<usize>;
+    ) -> StoreResult<RecolorReport>;
 
     /// Forget cached reads (the type catalog changed, so cached events carry stale types).
     fn invalidate_cache(&self) {}

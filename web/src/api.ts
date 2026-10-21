@@ -203,6 +203,8 @@ export interface MigrationState {
   patched: number | null;
 }
 export interface TypesEditor {
+  /** Identifies the catalog the editor was loaded with; sent back on save. */
+  revision: string;
   palette: PaletteEntry[];
   max_custom: number;
   max_name: number;
@@ -223,9 +225,10 @@ export interface TypesResult {
 }
 
 export const getTypes = (): Promise<TypesEditor> => call("GET", "/api/admin/types");
-export const putTypes = (types: EditableType[], dryRun: boolean): Promise<TypesResult> =>
+export const putTypes = (types: EditableType[], dryRun: boolean, revision: string): Promise<TypesResult> =>
   call("PUT", "/api/admin/types", {
     types: types.map(({ code, color_id, labels }) => ({ code, color_id, labels })),
     dry_run: dryRun,
+    revision,
   });
 export const resumeTypes = (): Promise<{ resumed: boolean }> => call("POST", "/api/admin/types/resume", {});

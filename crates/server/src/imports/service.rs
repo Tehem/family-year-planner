@@ -14,6 +14,9 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use super::{ImportCounts, Importer};
 use crate::storage::{Db, now_ts};
 
+/// `error` of a run that did not start because a category color migration was running.
+pub const SKIPPED_MIGRATING: &str = "skipped:migrating";
+
 /// Re-run at startup when the last success is older than this.
 const STALE_AFTER_DAYS: i64 = 31;
 
@@ -178,8 +181,10 @@ impl ImportService {
     /// A run that could not start is still recorded, so that Réglages shows why nothing happened.
     async fn record_skipped(&self, trigger: &str) -> Option<ImportRun> {
         let id = self.start_run(trigger).await.ok()?;
-        let msg = "Import ignoré : les catégories sont en cours de modification.".to_string();
-        self.finish_run(id, Err(msg)).await.ok()?;
+        // A code, not a sentence: the page translates it ("skipped:" runs are not failures).
+        self.finish_run(id, Err(SKIPPED_MIGRATING.to_string()))
+            .await
+            .ok()?;
         self.recent_runs(1).await.ok().and_then(|mut v| v.pop())
     }
 

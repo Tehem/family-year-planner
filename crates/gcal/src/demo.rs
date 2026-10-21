@@ -1,7 +1,6 @@
 //! In-memory calendar store seeded with the prototype's sample data (`APP_MODE=demo`).
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use annee_domain::birthday::{age_at, first_occurrence};
@@ -13,7 +12,9 @@ use chrono_tz::Tz;
 
 use crate::recurrence::{birthday_series_start, instance_id, shift, yearly_occurrence};
 use crate::registry::TypeRegistry;
-use crate::store::{CalendarStore, DeleteScope, ImportedEvent, StoreError, StoreResult};
+use crate::store::{
+    CalendarStore, DeleteScope, ImportedEvent, RecolorReport, StoreError, StoreResult,
+};
 
 /// Year in which demo birthday series start (any displayed year shows them).
 const SERIES_START_YEAR: i32 = 1900;
@@ -92,8 +93,6 @@ pub struct DemoStore {
     tz: Tz,
     members: Vec<String>,
     registry: Arc<TypeRegistry>,
-    /// Makes `recolor` fail, to exercise the failure paths of a color migration (tests).
-    fail_recolor: AtomicBool,
     inner: Mutex<Inner>,
 }
 
@@ -103,7 +102,6 @@ impl DemoStore {
             tz,
             members,
             registry: Arc::new(TypeRegistry::default()),
-            fail_recolor: AtomicBool::new(false),
             inner: Mutex::new(Inner::default()),
         }
     }
@@ -112,11 +110,6 @@ impl DemoStore {
     pub fn with_registry(mut self, registry: Arc<TypeRegistry>) -> Self {
         self.registry = registry;
         self
-    }
-
-    /// Make every `recolor` fail like an unreachable Google Calendar (tests).
-    pub fn set_fail_recolor(&self, fail: bool) {
-        self.fail_recolor.store(fail, Ordering::SeqCst);
     }
 
     /// Forget every change and start again from the sample data.
@@ -657,10 +650,7 @@ impl CalendarStore for DemoStore {
         _migration_id: &str,
         mapping: &BTreeMap<String, Option<String>>,
         target: &TypeCatalog,
-    ) -> StoreResult<usize> {
-        if self.fail_recolor.load(Ordering::SeqCst) {
-            return Err(StoreError::Upstream("simulated outage".into()));
-        }
+    ) -> StoreResult<RecolorReport> {
         let current = self.registry.current();
         let mut inner = self.inner.lock().unwrap();
         let mut patched = 0;
@@ -677,7 +667,10 @@ impl CalendarStore for DemoStore {
             }
             patched += 1;
         }
-        Ok(patched)
+        Ok(RecolorReport {
+            patched,
+            skipped: 0,
+        })
     }
 }
 

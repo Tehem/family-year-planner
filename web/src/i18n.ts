@@ -150,6 +150,8 @@ const FR = {
   "set.imports.success": "Réussi",
   "set.imports.failed": "Échec",
   "set.imports.runningStatus": "En cours",
+  "set.imports.skipped": "Ignoré",
+  "set.imports.skipped.migrating": "Les catégories étaient en cours de modification.",
   // Catégories (editor)
   "types.title": "Catégories",
   "types.help":
@@ -343,6 +345,8 @@ const EN: Record<Key, string> = {
   "set.imports.success": "Succeeded",
   "set.imports.failed": "Failed",
   "set.imports.runningStatus": "Running",
+  "set.imports.skipped": "Skipped",
+  "set.imports.skipped.migrating": "The categories were being modified.",
   "types.title": "Categories",
   "types.help":
     "Rename the categories and choose their color: the color matches a Google Calendar event color. You can also add your own categories.",
@@ -421,9 +425,10 @@ export function adoptDefaultLang(l: string | undefined): void {
 let switchHost: HTMLElement | null = null;
 
 export function t(key: Key, params?: Record<string, string | number>): string {
-  let s = DICT[lang][key];
-  if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, String(v));
-  return s;
+  const s = DICT[lang][key];
+  if (!params) return s;
+  // One pass with a function: values are inserted verbatim (`$&` and `{other}` in a title mean nothing).
+  return s.replace(/\{(\w+)\}/g, (m, name: string) => (name in params ? String(params[name]) : m));
 }
 
 /** French and English text for the same key (the editor shows both names). */

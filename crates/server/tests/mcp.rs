@@ -670,15 +670,15 @@ async fn custom_types_appear_in_the_context_and_the_tool_schemas_and_can_be_used
     let (state, base) = setup().await;
     let client = connect(&base, &pat(&state, "Claude", Scope::ReadWrite).await).await;
     let before = client.list_all_tools().await.unwrap();
-    let enum_of = |tools: &[rmcp::model::Tool], tool: &str| {
+    // The type parameters are free strings listing the codes in their description: a cached
+    // `tools/list` must not refuse a code added since.
+    let type_schema = |tools: &[rmcp::model::Tool], tool: &str| {
         let t = tools.iter().find(|t| t.name == tool).unwrap();
-        t.input_schema["properties"]["type"]["enum"].clone()
+        t.input_schema["properties"]["type"].clone()
     };
-    assert!(
-        !enum_of(&before, "create_event")
-            .to_string()
-            .contains("custom_1")
-    );
+    let before_schema = type_schema(&before, "create_event");
+    assert!(before_schema.get("enum").is_none());
+    assert!(!before_schema.to_string().contains("custom_1"));
 
     let names = |s: &str| Names {
         singular: s.into(),
@@ -724,10 +724,9 @@ async fn custom_types_appear_in_the_context_and_the_tool_schemas_and_can_be_used
 
     let after = client.list_all_tools().await.unwrap();
     for tool in ["create_event", "update_event"] {
-        assert!(
-            enum_of(&after, tool).to_string().contains("custom_1"),
-            "{tool}"
-        );
+        let schema = type_schema(&after, tool);
+        assert!(schema.get("enum").is_none(), "{tool}");
+        assert!(schema.to_string().contains("custom_1 (Sport)"), "{tool}");
     }
     let ev = structured(
         &call(

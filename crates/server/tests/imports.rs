@@ -630,8 +630,45 @@ async fn an_import_during_a_migration_is_recorded_as_skipped() {
     registry.set_migrating(true);
     let run = svc.run("manual").await.unwrap();
     assert_eq!(run.status, "failed");
-    assert!(run.error.unwrap().contains("catégories"));
+    assert_eq!(run.error.as_deref(), Some("skipped:migrating"));
     assert_eq!(svc.recent_runs(10).await.unwrap().len(), 1);
     registry.set_migrating(false);
     assert_eq!(svc.run("manual").await.unwrap().status, "success");
+}
+
+#[tokio::test]
+async fn a_run_without_the_kind_check_does_not_read_recolored_events_as_stale() {
+    use annee_domain::{EventType, Source};
+    let store = store();
+    importer(store.clone(), Arc::new(FixtureEducation))
+        .run(today(), false)
+        .await
+        .unwrap();
+    let victim = imported(&store).await[0].clone();
+    store
+        .update_imported(
+            &victim.id,
+            &annee_gcal::ImportedEvent {
+                kind: EventType::Unclassified,
+                title: victim.title.clone(),
+                start: victim.start,
+                end: victim.end,
+                source: Source::ImportPublicHolidays,
+                source_id: victim.source_id.clone().unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    // `annee import --dry-run` cannot know the stored colors: no spurious update.
+    let (counts, _) = importer(store.clone(), Arc::new(FixtureEducation))
+        .without_kind_check()
+        .run(today(), true)
+        .await
+        .unwrap();
+    assert_eq!(counts.updated, 0);
+    let (counts, _) = importer(store, Arc::new(FixtureEducation))
+        .run(today(), true)
+        .await
+        .unwrap();
+    assert_eq!(counts.updated, 1);
 }

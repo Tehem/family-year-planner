@@ -69,6 +69,19 @@ test.describe("languages (SPEC §19.2)", () => {
     await expect(page.getByRole("heading", { name: "Accès des agents" })).toBeVisible();
   });
 
+  test("user text is inserted verbatim in translated messages", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(".bar").first()).toBeVisible();
+    await page.getByRole("button", { name: "Ajouter un événement", exact: true }).click();
+    await page.getByLabel("Titre").fill("Cost $& more {title}");
+    await page.getByLabel("Premier jour").fill("2026-11-10");
+    await page.getByLabel("Dernier jour").fill("2026-11-10");
+    await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+    await page.locator(".bar", { hasText: "Cost $& more" }).click();
+    await page.getByRole("button", { name: "Supprimer" }).click();
+    await expect(page.locator("#panel .confirm")).toContainText("Supprimer « Cost $& more {title} » ?");
+  });
+
   test("API errors follow the language", async ({ page }) => {
     await page.goto("/?lang=en");
     await expect(page.locator(".bar").first()).toBeVisible();

@@ -36,6 +36,14 @@ impl From<TypeAdminError> for ApiError {
             ),
             TypeAdminError::Store(s) => s.into(),
             TypeAdminError::Busy => crate::error::migrating(),
+            TypeAdminError::Stale => ApiError::new(
+                StatusCode::CONFLICT,
+                "stale_catalog",
+                tr(
+                    "Les catégories ont été modifiées entre-temps. Rechargez la page.",
+                    "The categories were modified in the meantime. Reload the page.",
+                ),
+            ),
             TypeAdminError::Pending => ApiError::new(
                 StatusCode::CONFLICT,
                 "migration_pending",
@@ -62,6 +70,7 @@ async fn types_put(
     _m: Member,
     ApiJson(body): ApiJson<TypesBody>,
 ) -> Result<Json<Value>, ApiError> {
+    s.type_admin.check_revision(body.revision.as_deref())?;
     let target = catalog_from_input(body.types).map_err(TypeAdminError::from)?;
     if body.dry_run {
         let preview = s.type_admin.preview(&target).await?;

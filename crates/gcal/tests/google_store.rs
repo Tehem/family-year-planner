@@ -837,7 +837,8 @@ async fn recolor_applies_a_swap_in_one_pass_and_skips_migrated_events() {
         .await
         .unwrap();
     assert_eq!(
-        n, 3,
+        (n.patched, n.skipped),
+        (3, 0),
         "d is not in the mapping, e already carries the migration id"
     );
 }
@@ -872,4 +873,88 @@ async fn a_listing_that_overlaps_an_invalidation_is_not_cached() {
     first.await.unwrap().unwrap();
     // The stale listing was served but not kept: the next call fetches again (both mocks expect 2).
     s.list_year(2026).await.unwrap();
+}
+
+#[tokio::test]
+async fn recolor_skips_an_event_google_refuses_for_good_but_not_a_rate_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(events_path(FAMILLE)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+            all_day("ok", "A", Some("9"), "2026-02-21", "2026-03-01"),
+            all_day("locked", "B", Some("9"), "2026-04-01", "2026-04-02"),
+            all_day("gone", "C", Some("9"), "2026-04-03", "2026-04-04"),
+            all_day("last", "D", Some("9"), "2026-04-05", "2026-04-06")
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(events_path(REPERES)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&server)
+        .await;
+    let patched = || {
+        ResponseTemplate::new(200).set_body_json(all_day(
+            "x",
+            "x",
+            None,
+            "2026-01-01",
+            "2026-01-02",
+        ))
+    };
+    for id in ["ok", "last"] {
+        Mock::given(method("PATCH"))
+            .and(path(event_path(FAMILLE, id)))
+            .respond_with(patched())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    // Not writable by the service account: skipped. Deleted meanwhile: skipped.
+    Mock::given(method("PATCH"))
+        .and(path(event_path(FAMILLE, "locked")))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(
+                json!({"error": {"errors": [{"reason": "forbiddenForNonOrganizer"}]}}),
+            ),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(event_path(FAMILLE, "gone")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let mapping = [("9".to_string(), Some("6".to_string()))].into();
+    let report = store(&server)
+        .recolor("m", &mapping, &TypeCatalog::default())
+        .await
+        .unwrap();
+    assert_eq!((report.patched, report.skipped), (2, 2));
+
+    // A 403 that is a rate limit is transient: the pass fails, to be retried.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(events_path(FAMILLE)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+            all_day("a", "A", Some("9"), "2026-02-21", "2026-03-01")
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(events_path(REPERES)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .set_body_json(json!({"error": {"errors": [{"reason": "rateLimitExceeded"}]}})),
+        )
+        .mount(&server)
+        .await;
+    let err = store(&server)
+        .recolor("m", &mapping, &TypeCatalog::default())
+        .await;
+    assert!(matches!(err, Err(StoreError::Upstream(_))));
 }

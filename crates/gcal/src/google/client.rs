@@ -14,6 +14,9 @@ use crate::store::StoreError;
 pub enum ApiError {
     NotFound,
     PreconditionFailed,
+    /// Google refused this very request (400, or a 403 that is not a rate limit): retrying cannot
+    /// help, but the other events are unaffected.
+    Rejected(String),
     Upstream(String),
 }
 
@@ -22,7 +25,7 @@ impl From<ApiError> for StoreError {
         match e {
             ApiError::NotFound => StoreError::NotFound,
             ApiError::PreconditionFailed => StoreError::Conflict,
-            ApiError::Upstream(m) => StoreError::Upstream(m),
+            ApiError::Rejected(m) | ApiError::Upstream(m) => StoreError::Upstream(m),
         }
     }
 }
@@ -131,10 +134,17 @@ impl Client {
             StatusCode::PRECONDITION_FAILED => Err(ApiError::PreconditionFailed),
             _ => {
                 let text = resp.text().await.unwrap_or_default();
-                Err(ApiError::Upstream(format!(
-                    "Google answered {status}: {}",
-                    truncate(&text)
-                )))
+                let msg = format!("Google answered {status}: {}", truncate(&text));
+                // A 403 is also how Google reports a rate limit: that one is worth retrying.
+                let rate_limited =
+                    text.contains("ateLimitExceeded") || text.contains("uotaExceeded");
+                if status == StatusCode::BAD_REQUEST
+                    || (status == StatusCode::FORBIDDEN && !rate_limited)
+                {
+                    Err(ApiError::Rejected(msg))
+                } else {
+                    Err(ApiError::Upstream(msg))
+                }
             }
         }
     }

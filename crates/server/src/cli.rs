@@ -54,7 +54,9 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
         .unwrap_or_else(|| Utc::now().with_timezone(&tz).date_naive());
 
     let Some(db) = db else {
-        let importer = Importer::new(store, education, config.imports.clone(), tz);
+        // The dry run knows no stored colors: it must not read a recolored calendar as stale.
+        let importer =
+            Importer::new(store, education, config.imports.clone(), tz).without_kind_check();
         let (counts, lines) = importer.run(today, true).await.map_err(|e| anyhow!(e))?;
         for l in lines {
             println!("{l}");
@@ -66,7 +68,10 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
         return Ok(());
     };
     // The server may be rewriting colors (its in-memory flag is not visible from this process).
-    if has_unfinished_migration(&db).await {
+    if has_unfinished_migration(&db)
+        .await
+        .map_err(|e| anyhow!("cannot read the category migrations: {e}"))?
+    {
         return Err(anyhow!(
             "a category color change is unfinished: resume it in Réglages first"
         ));

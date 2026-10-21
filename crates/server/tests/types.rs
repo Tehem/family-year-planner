@@ -535,3 +535,54 @@ async fn kiosks_and_anonymous_visitors_cannot_edit_types() {
         .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn a_save_from_a_stale_editor_is_refused() {
+    let mut app = logged_in().await;
+    let editor = app.get("/api/admin/types").await.json();
+    let stale = editor["revision"].as_str().unwrap().to_string();
+    assert_eq!(stale.len(), 16);
+
+    // Someone else adds a category and saves.
+    let mut types = catalog(&mut app).await;
+    types.push(custom(1, "6", "Sport", "Sports"));
+    let r = app
+        .api(
+            axum::http::Method::PUT,
+            "/api/admin/types",
+            Some(json!({"types": types, "revision": stale})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let fresh = app.get("/api/admin/types").await.json()["revision"].clone();
+    assert_ne!(fresh, json!(stale), "the revision follows the catalog");
+
+    // The stale tab renames a type: its body has no `custom_1`, which would delete it.
+    let mut old_view = catalog(&mut app).await;
+    old_view.retain(|t| t["code"] != "custom_1");
+    for dry_run in [true, false] {
+        let r = app
+            .api(
+                axum::http::Method::PUT,
+                "/api/admin/types",
+                Some(json!({"types": old_view, "revision": stale, "dry_run": dry_run})),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CONFLICT, "dry_run={dry_run}");
+        assert_eq!(r.json()["error"]["code"], "stale_catalog");
+    }
+    assert_eq!(
+        app.get("/api/admin/types").await.json()["free_colors"],
+        json!(["1", "7"])
+    );
+
+    // With the fresh revision the save goes through.
+    let r = app
+        .api(
+            axum::http::Method::PUT,
+            "/api/admin/types",
+            Some(json!({"types": old_view, "revision": fresh})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+}

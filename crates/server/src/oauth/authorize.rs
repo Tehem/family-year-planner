@@ -172,34 +172,21 @@ async fn validate(state: &AppState, p: &HashMap<String, String>) -> Result<Reque
     })
 }
 
-/// The page shell is authored in French: set its language and title for the request.
-fn localize_shell(html: &str) -> String {
-    let lang = current();
-    html.replace("<html lang=\"fr\">", &format!("<html lang=\"{lang}\">"))
-        .replace(
-            "Autorisation – Année en famille",
-            lang.pick(
-                "Autorisation – Année en famille",
-                "Authorization – Family year",
-            ),
-        )
-        .replace(
-            "<title>Année en famille</title>",
-            &format!(
-                "<title>{}</title>",
-                lang.pick("Année en famille", "Family year")
-            ),
-        )
+/// Fills the `<!--LANG-->` and `<!--TITLE-->` placeholders of the page shell for the request
+/// language, then the body. The body goes in last, so that user text is never searched.
+fn render_shell(tpl: &str, lang: annee_domain::Lang, body_html: &str) -> String {
+    let title = lang.pick(
+        "Autorisation – Année en famille",
+        "Authorization – Family year",
+    );
+    tpl.replace("<!--LANG-->", lang.code())
+        .replace("<!--TITLE-->", title)
+        .replace("<!--BODY-->", body_html)
 }
 
 fn page(status: StatusCode, body_html: &str) -> Response {
     let tpl = web::template("consent.html").unwrap_or_else(|| web::FALLBACK_TEMPLATE.to_string());
-    let html = if tpl.contains("<!--BODY-->") {
-        tpl.replace("<!--BODY-->", body_html)
-    } else {
-        tpl
-    };
-    let html = localize_shell(&html);
+    let html = render_shell(&tpl, current(), body_html);
     let mut res = (status, html).into_response();
     let h = res.headers_mut();
     h.insert(
@@ -497,5 +484,38 @@ mod tests {
         assert_eq!(normalize_scope(Some("offline_access")), None);
         assert_eq!(normalize_scope(Some("calendar:read admin")), None);
         assert_eq!(normalize_scope(Some("")), None);
+    }
+
+    use annee_domain::Lang;
+
+    #[test]
+    fn the_shell_placeholders_are_filled_for_each_language() {
+        for tpl in [
+            web::FALLBACK_TEMPLATE,
+            include_str!("../../../../web/consent.html"),
+        ] {
+            assert!(tpl.contains("<!--LANG-->") && tpl.contains("<!--TITLE-->"));
+            assert!(tpl.contains("<!--BODY-->"));
+            let fr = render_shell(tpl, Lang::Fr, "<p>corps</p>");
+            assert!(
+                fr.contains("<html lang=\"fr\">") && fr.contains("Autorisation – Année en famille")
+            );
+            let en = render_shell(tpl, Lang::En, "<p>body</p>");
+            assert!(
+                en.contains("<html lang=\"en\">") && en.contains("Authorization – Family year")
+            );
+            assert!(en.contains("<p>body</p>"));
+            assert!(!en.contains("<!--"), "no placeholder is left: {en}");
+        }
+    }
+
+    #[test]
+    fn user_text_in_the_body_is_never_treated_as_a_placeholder() {
+        let out = render_shell(
+            "<title><!--TITLE--></title><!--BODY-->",
+            Lang::En,
+            "<!--TITLE--> évil",
+        );
+        assert!(out.ends_with("<!--TITLE--> évil"));
     }
 }

@@ -298,9 +298,11 @@ async function save_(): Promise<void> {
   btn.disabled = true;
   status();
   try {
-    const preview = await putTypes(draft, true);
-    if (preview.changes.length === 0 && preview.orphans === 0) {
-      await putTypes(draft, false);
+    const preview = await putTypes(draft, true, server.revision);
+    // Nothing to confirm unless an existing event is concerned (a new or unused type has none).
+    const concerned = preview.changes.reduce((n, c) => n + c.events, 0) + preview.orphans;
+    if (concerned === 0) {
+      await putTypes(draft, false, server.revision);
       await reload(t("types.saved"));
       return;
     }
@@ -328,7 +330,7 @@ function initDialog(): void {
     const yes = byId<HTMLButtonElement>("typesDlgYes");
     yes.disabled = true;
     try {
-      await putTypes(draft, false);
+      await putTypes(draft, false, server.revision);
       dlg.close();
       await reload(t("types.saved"));
     } catch (e) {

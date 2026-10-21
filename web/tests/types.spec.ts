@@ -178,6 +178,41 @@ test.describe("Catégories", () => {
     await expect(card(page, "custom_2")).toHaveCount(1);
   });
 
+  test("a save from a stale editor is refused with a message and keeps the edits", async ({ page, request }) => {
+    await openTypes(page);
+    await field(page, "trip", "fr", "plural").fill("Escapades");
+    // Another browser adds a category and saves first.
+    const current = (await (await request.get("/api/admin/types")).json()) as { types: unknown[] };
+    const body = {
+      types: [
+        ...current.types,
+        { code: "custom_1", color_id: "6", labels: { fr: { singular: "Sport", plural: "Sport" }, en: { singular: "Sport", plural: "Sport" } } },
+      ],
+    };
+    const r = await request.put("/api/admin/types", { data: body, headers: { "X-Requested-With": "annee" } });
+    expect(r.ok()).toBeTruthy();
+    await save(page).click();
+    await expect(page.getByRole("alert").filter({ hasText: "modifiées entre-temps" })).toBeVisible();
+    await expect(field(page, "trip", "fr", "plural")).toHaveValue("Escapades");
+    await page.reload();
+    await expect(page.locator(".type-card")).toHaveCount(10);
+    await expect(card(page, "custom_1")).toHaveCount(1);
+  });
+
+  test("an unused or new category is saved without a confirmation", async ({ page }) => {
+    await openTypes(page);
+    await page.getByRole("button", { name: "Ajouter une catégorie" }).click();
+    await card(page, "custom_1").locator("select").selectOption("7");
+    await save(page).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
+    // Recoloring it now touches no event: still no dialog.
+    await card(page, "custom_1").locator("select").selectOption("1");
+    await save(page).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
+  });
+
   test("at most three added categories", async ({ page }) => {
     await openTypes(page);
     const add = page.getByRole("button", { name: "Ajouter une catégorie" });

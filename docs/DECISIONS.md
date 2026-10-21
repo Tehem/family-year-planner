@@ -414,6 +414,9 @@ alternatives considered.
   events, so an event written with a stale color heals on the next import. The in-memory catalog switches only
   when the pass completes.
 - **Alternatives:** blocking recoloring when events exist; recoloring one type at a time (no swaps); a cancel path.
+- **Also:** an event Google refuses for good (a 400, or a 403 that is not a rate limit) or that disappeared is
+  skipped and logged, so that one event the service account cannot modify never freezes the family's calendar;
+  the migration row records how many were left as they were. Rate-limit 403s stay retryable.
 - **Limit:** while a pass is suspended after repeated failures, reads use the old catalog, so already-recolored
   events appear under another type until the migration is resumed. There is no rollback (see the open question
   on the PR).
@@ -431,8 +434,10 @@ alternatives considered.
 ## D36 — MCP follows the catalog
 
 - **Context:** agents must be able to use added types and see renamed ones; SPEC §13.1 still asks for French titles.
-- **Choice:** tool schemas list the codes of the current catalog (`custom_N` included) and `get_context` returns
-  `label`, `labels {fr,en}`, `color_id`, `custom`. Tool descriptions and the "titles in French" instruction stay as
+- **Choice:** `get_context` is the source of truth and returns
+  `label`, `labels {fr,en}`, `color_id`, `custom`; the `type` parameters of the tools are plain strings whose
+  description lists the current codes (an `enum` would go stale in an agent's cached `tools/list`, and this
+  stateless server cannot send `list_changed`). Tool descriptions and the "titles in French" instruction stay as
   in SPEC §13.1; one sentence is appended about configurable types. Messages use the instance default language (D32).
 - **Alternatives:** per-token language; letting the instructions say titles may be in any language (rejected: the
   shared calendar is written in French).
@@ -461,3 +466,11 @@ alternatives considered.
   user saves first. A deleted type's events are cleared, never silently re-typed.
 - **Alternatives:** random identities for added types (breaks the stable `custom_N` codes agents rely on);
   server-side detection (cannot tell a rename from a replacement).
+
+## D40 — A save carries the catalog revision it was edited from
+
+- **Context:** the editor `PUT`s the whole catalog, and two adults can have Réglages open at once; a stale tab
+  lacking a category added elsewhere would delete it (and clear its events' colors).
+- **Choice:** `GET /api/admin/types` returns a `revision` (a short hash of the catalog); a `PUT` with another
+  revision, dry run included, is refused with `409 stale_catalog` and the unsaved edits stay on screen.
+- **Alternatives:** last write wins (silent data loss); locking the editor per session (needs presence tracking).

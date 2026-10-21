@@ -102,6 +102,8 @@ pub struct Importer {
     education: Arc<dyn EducationSource>,
     cfg: ImportsSection,
     tz: Tz,
+    /// Treat an event of another type (so another color) as out of date (§19.5).
+    compare_kind: bool,
 }
 
 /// School year (`2025-2026`) of a `edu:` source id.
@@ -126,7 +128,14 @@ impl Importer {
             education,
             cfg,
             tz,
+            compare_kind: true,
         }
+    }
+
+    /// For a run that cannot know the family's colors (`annee import --dry-run`).
+    pub fn without_kind_check(mut self) -> Self {
+        self.compare_kind = false;
+        self
     }
 
     /// Compute the plan for `today` without writing anything.
@@ -185,7 +194,7 @@ impl Importer {
                     if keep.title != d.title
                         || keep.start != d.start
                         || keep.end != d.end
-                        || keep.kind != d.kind
+                        || (self.compare_kind && keep.kind != d.kind)
                     {
                         plan.update.push((keep.id.clone(), d.clone()));
                     } else {

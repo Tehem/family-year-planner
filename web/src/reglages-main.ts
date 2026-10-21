@@ -251,12 +251,18 @@ async function reloadGrants(): Promise<void> {
 
 let pollTimer = 0;
 
-const runLabel = (s: ImportRun["status"]): string =>
-  t(s === "success" ? "set.imports.success" : s === "failed" ? "set.imports.failed" : "set.imports.runningStatus");
+/** A run that never started (a category migration was running) is stored as `skipped:<reason>`. */
+const isSkipped = (r: ImportRun): boolean => r.status === "failed" && (r.error ?? "").startsWith("skipped:");
+const runLabel = (r: ImportRun): string =>
+  isSkipped(r)
+    ? t("set.imports.skipped")
+    : t(r.status === "success" ? "set.imports.success" : r.status === "failed" ? "set.imports.failed" : "set.imports.runningStatus");
+const runError = (r: ImportRun): string =>
+  isSkipped(r) ? t("set.imports.skipped.migrating") : (r.error ?? "");
 
 function renderRuns(runs: ImportRun[]): void {
   const rows = runs.map((r) => {
-    const status = h("span", `run-${r.status}`, runLabel(r.status));
+    const status = h("span", `run-${isSkipped(r) ? "skipped" : r.status}`, runLabel(r));
     return [
       text(fmtDateTime(r.started_at, tz)),
       status,
@@ -264,7 +270,7 @@ function renderRuns(runs: ImportRun[]): void {
       text(String(r.updated)),
       text(String(r.deleted)),
       text(String(r.unchanged)),
-      text(r.error ?? ""),
+      text(runError(r)),
     ];
   });
   byId("runs").replaceChildren(

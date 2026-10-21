@@ -22,7 +22,9 @@ use self::mapping::{DatePatch, MapCtx};
 use self::model::GEvent;
 use crate::recurrence::{birthday_series_start, instance_id, shift, yearly_occurrence};
 use crate::registry::TypeRegistry;
-use crate::store::{CalendarStore, DeleteScope, ImportedEvent, StoreError, StoreResult};
+use crate::store::{
+    CalendarStore, DeleteScope, ImportedEvent, RecolorReport, StoreError, StoreResult,
+};
 
 pub const GOOGLE_API_BASE: &str = "https://www.googleapis.com";
 const CACHE_TTL: Duration = Duration::from_secs(60);
@@ -150,11 +152,16 @@ impl GoogleStore {
         new: &NewEvent,
         writer: &str,
     ) -> Result<Event, ApiError> {
+        let catalog = self.registry.current();
         let (raw, master) = self.load(id).await?;
-        let current = self.map(&raw, id.calendar).ok_or(ApiError::NotFound)?;
+        let current = self
+            .map_with(&raw, id.calendar, &catalog)
+            .ok_or(ApiError::NotFound)?;
         let target = master.as_ref().unwrap_or(&raw);
         let target_id = target.id.clone().ok_or(ApiError::NotFound)?;
-        let master_event = master.as_ref().and_then(|m| self.map(m, id.calendar));
+        let master_event = master
+            .as_ref()
+            .and_then(|m| self.map_with(m, id.calendar, &catalog));
         let recurring = master.is_some() || raw.recurrence.is_some();
 
         // Which calendar must the event live in after the edit?
@@ -208,7 +215,6 @@ impl GoogleStore {
             None
         };
         let include_color = new.kind != current.kind || moved_from.is_some();
-        let catalog = self.registry.current();
         let color = catalog.color_id(new.kind);
         let body = mapping::patch_body(
             &current,
@@ -233,13 +239,15 @@ impl GoogleStore {
         };
         self.invalidate();
 
-        let mapped = self.map(&patched, cal).ok_or(ApiError::NotFound)?;
+        let mapped = self
+            .map_with(&patched, cal, &catalog)
+            .ok_or(ApiError::NotFound)?;
         if recurring || patched.recurrence.is_some() {
             // Return the occurrence the user was looking at.
             let date = yearly_occurrence(mapped.start, new.start.year()).unwrap_or(new.start);
             let iid = instance_id(&target_id, date);
             if let Ok(inst) = self.client.get(cal, &iid).await
-                && let Some(e) = self.map(&inst, cal)
+                && let Some(e) = self.map_with(&inst, cal, &catalog)
             {
                 return Ok(e);
             }
@@ -321,6 +329,7 @@ impl CalendarStore for GoogleStore {
     }
 
     async fn list_imported(&self, from: NaiveDate, to: NaiveDate) -> StoreResult<Vec<Event>> {
+        let catalog = self.registry.current();
         let mut out = Vec::new();
         for src in [Source::ImportEducation, Source::ImportPublicHolidays] {
             let params = ListParams {
@@ -332,7 +341,7 @@ impl CalendarStore for GoogleStore {
             let raw = self.client.list(CalendarKind::Reperes, &params).await?;
             out.extend(
                 raw.iter()
-                    .filter_map(|g| self.map(g, CalendarKind::Reperes)),
+                    .filter_map(|g| self.map_with(g, CalendarKind::Reperes, &catalog)),
             );
         }
         Ok(out)
@@ -394,8 +403,8 @@ impl CalendarStore for GoogleStore {
         migration_id: &str,
         mapping: &BTreeMap<String, Option<String>>,
         _target: &TypeCatalog,
-    ) -> StoreResult<usize> {
-        let mut patched = 0;
+    ) -> StoreResult<RecolorReport> {
+        let mut report = RecolorReport::default();
         let outcome = async {
             for cal in [CalendarKind::Reperes, CalendarKind::Famille] {
                 for g in self.client.list(cal, &MASTERS).await? {
@@ -411,8 +420,15 @@ impl CalendarStore for GoogleStore {
                         continue;
                     };
                     let body = mapping::recolor_patch(migration_id, new.as_deref());
-                    self.client.patch(cal, id, &body, None).await?;
-                    patched += 1;
+                    match self.client.patch(cal, id, &body, None).await {
+                        Ok(_) => report.patched += 1,
+                        // Deleted meanwhile, or refused for good: leave this one, go on.
+                        Err(e @ (ApiError::NotFound | ApiError::Rejected(_))) => {
+                            tracing::warn!(event = id, error = ?e, "color migration skipped an event");
+                            report.skipped += 1;
+                        }
+                        Err(other) => return Err(other.into()),
+                    }
                 }
             }
             Ok::<(), StoreError>(())
@@ -420,7 +436,7 @@ impl CalendarStore for GoogleStore {
         .await;
         // Whatever happened, events were rewritten: never serve stale types.
         self.invalidate();
-        outcome.map(|()| patched)
+        outcome.map(|()| report)
     }
 }
 

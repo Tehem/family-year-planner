@@ -226,25 +226,16 @@ fn date_prop(desc: &str) -> Value {
     json!({"type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": desc})
 }
 
-fn type_codes(catalog: &TypeCatalog, only_writable: bool) -> Vec<&'static str> {
+/// `trip ('Voyage ou vacances'), …` with the French names of the catalog. The type parameters are
+/// plain strings, not enums: the catalog can change while an agent keeps a cached `tools/list`, and
+/// this stateless server cannot notify it (`get_context` is the source of truth).
+fn types_description(catalog: &TypeCatalog, only_writable: bool) -> String {
     catalog
         .kinds()
         .filter(|t| !only_writable || t.writable())
-        .map(EventType::code)
-        .collect()
-}
-
-/// `birthday ('Anniversaire'), …` for the writable types, with the French names of the catalog.
-fn writable_types_description(catalog: &TypeCatalog) -> String {
-    let list: Vec<String> = catalog
-        .kinds()
-        .filter(|t| t.writable())
         .map(|t| format!("{} ({})", t.code(), catalog.label(t, Lang::Fr)))
-        .collect();
-    format!(
-        "Event category (code). Writable types: {}. get_context returns the current list.",
-        list.join(", ")
-    )
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn members_prop(desc: &str) -> Value {
@@ -254,9 +245,9 @@ fn members_prop(desc: &str) -> Value {
 /// The tool catalogue.
 pub fn tools(catalog: &TypeCatalog) -> Vec<Tool> {
     let ro = || ToolAnnotations::new().read_only(true);
-    let event_fields = |writable_only_types: bool| {
+    let event_fields = || {
         json!({
-            "type": {"type": "string", "enum": type_codes(catalog, writable_only_types), "description": writable_types_description(catalog)},
+            "type": {"type": "string", "description": format!("Event category (code). Writable types: {}. get_context returns the current list.", types_description(catalog, true))},
             "title": {"type": "string", "maxLength": 120, "description": "Title in French, 1 to 120 characters."},
             "start": date_prop("First day, YYYY-MM-DD."),
             "end": date_prop("Last day, YYYY-MM-DD, INCLUSIVE (>= start, at most 366 days). Defaults to start. Birthdays last exactly one day."),
@@ -266,8 +257,8 @@ pub fn tools(catalog: &TypeCatalog) -> Vec<Tool> {
             "birth_year": {"type": ["integer", "null"], "minimum": 1900, "description": "Birthdays only: year of birth, used to display the age (e.g. 'Anniversaire de Sacha (8 ans)')."}
         })
     };
-    let create_props = event_fields(true);
-    let mut update_props = event_fields(true);
+    let create_props = event_fields();
+    let mut update_props = event_fields();
     if let Some(o) = update_props.as_object_mut() {
         o.insert("id".into(), json!({"type": "string", "description": "Event id as returned by list_events/get_day, e.g. 'f:abc123'. For an occurrence of a yearly birthday the whole series is edited."}));
     }
@@ -286,7 +277,7 @@ pub fn tools(catalog: &TypeCatalog) -> Vec<Tool> {
                 "properties": {
                     "from": date_prop("First day of the range, YYYY-MM-DD."),
                     "to": date_prop("Last day of the range, YYYY-MM-DD, inclusive."),
-                    "types": {"type": "array", "items": {"type": "string", "enum": type_codes(catalog, false)}, "description": "Only these event types."},
+                    "types": {"type": "array", "items": {"type": "string"}, "description": format!("Only these event types (codes): {}.", types_description(catalog, false))},
                     "member": {"type": "string", "description": "Only events involving this member (first name)."},
                     "query": {"type": "string", "description": "Case-insensitive text search in title, location and notes."}
                 },
@@ -317,7 +308,7 @@ pub fn tools(catalog: &TypeCatalog) -> Vec<Tool> {
                     "min_days": {"type": "integer", "minimum": 1, "default": 1, "description": "Minimum length of a period in days."},
                     "members": members_prop("Members who must all be free; default: the whole family."),
                     "during": {"type": "string", "enum": ["any", "school_holidays", "outside_school_holidays"], "default": "any", "description": "Restrict to school-holiday days, or to days outside school holidays."},
-                    "ignore_types": {"type": "array", "items": {"type": "string", "enum": type_codes(catalog, false)}, "description": "Event types that should not make a day busy (e.g. unclassified)."}
+                    "ignore_types": {"type": "array", "items": {"type": "string"}, "description": "Event types (codes) that should not make a day busy (e.g. unclassified)."}
                 },
                 "required": ["from", "to"],
                 "additionalProperties": false

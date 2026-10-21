@@ -1052,7 +1052,9 @@ Google's 11 event colors (name FR / EN): 1 Lavande / Lavender, 2 Sauge / Sage, 3
 4 Flamant / Flamingo, 5 Banane / Banana, 6 Mandarine / Tangerine, 7 Paon / Peacock,
 8 Graphite / Graphite, 9 Myrtille / Blueberry, 10 Basilic / Basil, 11 Tomate / Tomato.
 
-The app keeps its own palette keyed by `colorId` (`web/src/palette.ts`): for each id, a **bar color**
+The app keeps its own palette keyed by `colorId`, as CSS custom properties `--p<colorId>-bar` and
+`--p<colorId>-tint` in `web/src/styles.css` (light, dark and print variants; `web/src/colors.ts` points each
+type at the entry of its color): for each id, a **bar color**
 and a **tint color**, each in light and dark. The defaults for ids 2, 3, 4, 5, 9, 10, 11 reproduce
 the prototype's colors exactly (so the default catalog renders identically, visual diff 0 %);
 ids 1, 6, 7, 8 get new values in the same family. A type's rendering takes its color from the palette
@@ -1077,6 +1079,8 @@ existing events (both calendars, all years, series masters, imported events incl
 3. User writes and import runs hold a shared guard, the migration an exclusive one: it starts only when the
    writes in flight are done. The pass runs in a task detached from the HTTP request. The importer compares the
    type of existing events, so an event written with a stale color heals on the next import.
+   An event that Google refuses for good (a 400, or a 403 that is not a rate limit) or that vanished is skipped and
+   logged instead of aborting the pass; the migration then records how many were left as they were.
    The pass is **resumable**: before starting, the target catalog and a migration id are stored in
    `type_migrations` (status `running`); every patched event gets the private property
    `fy_migration=<id>` and is skipped if it already carries it. On startup a `running` migration is
@@ -1117,20 +1121,24 @@ The catalog is kept in memory (`TypeRegistry`) and shared with the calendar stor
   `TypeInfo` gains `color_id` (`string|null`) and `custom` (bool); `label` / `label_plural` are in
   the request language.
 - `GET /api/admin/types` →
-  `{ "palette": [{ "color_id", "name_fr", "name_en" }], "max_custom": 3,
+  `{ "revision", "palette": [{ "color_id", "name_fr", "name_en" }], "max_custom": 3,
      "types": [{ "code", "custom", "color_id", "labels": { "fr": {"singular","plural"}, "en": {…} } }] }`
-- `PUT /api/admin/types` body `{ "types": [same shape without palette], "dry_run": bool }` — the
+- `PUT /api/admin/types` body `{ "types": [same shape without palette], "dry_run": bool, "revision": string }` — the
   **complete** desired catalog (omitted custom types are deleted; built-ins must all be present).
   Response `{ "changes": [{ "code", "from_color_id", "to_color_id", "events": n }],
   "orphans": n, "applied": bool }`; `changes` and `orphans` are computed on a dry run only (they cost a scan
-  of both calendars), an applied save answers `changes: []`. Validation failures: `400` with a localized message.
+  of both calendars), an applied save answers `changes: []`. `revision` identifies the catalog the editor was loaded
+  with; a `PUT` carrying another one (a stale tab) is refused with `409 stale_catalog`, because a missing custom
+  type would otherwise read as a deletion. Validation failures: `400` with a localized message.
 - Both are web-session only, members only (not kiosk, not MCP).
 
 ### 19.8 MCP
 
 - `get_context` returns, for each type: `code`, `label` (instance default language), `labels`
   (`{fr, en}`), `calendar`, `writable`, `color_id`, `custom`. Tool and parameter names stay
-  English; the `type` parameter accepts any code of the current catalog (custom codes included);
+  English; the `type` parameters are plain strings (no `enum`: the catalog can change while an agent keeps a
+  cached `tools/list`, and the stateless server cannot notify it) that accept any code of the current catalog
+  (custom codes included);
   tool descriptions stay English and say that the list of valid types is returned by
   `get_context`. `instructions` mention that types are configurable.
 - Titles of imported events are localized like in the API (§19.2).

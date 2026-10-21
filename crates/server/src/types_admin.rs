@@ -33,6 +33,9 @@ pub struct TypesBody {
     pub types: Vec<TypeInput>,
     #[serde(default)]
     pub dry_run: bool,
+    /// The `revision` the editor was loaded with: a save from a stale page is refused.
+    #[serde(default)]
+    pub revision: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -63,6 +66,9 @@ pub enum TypeAdminError {
     /// An unfinished migration targets another catalog.
     #[error("another migration is pending")]
     Pending,
+    /// The catalog changed since the editor was loaded.
+    #[error("stale catalog revision")]
+    Stale,
     #[error("database error: {0}")]
     Database(String),
 }
@@ -167,12 +173,22 @@ pub async fn load_catalog(db: &Db) -> TypeCatalog {
 }
 
 /// Whether a color migration is unfinished in the database (another process may be running it).
-pub async fn has_unfinished_migration(db: &Db) -> bool {
-    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM type_migrations WHERE status != 'done'")
+/// A database error is an error: callers must not assume "no migration".
+pub async fn has_unfinished_migration(db: &Db) -> Result<bool, TypeAdminError> {
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM type_migrations WHERE status != 'done'")
         .fetch_one(&db.pool)
-        .await
-        .map(|n| n > 0)
-        .unwrap_or(false)
+        .await?;
+    Ok(n > 0)
+}
+
+/// Identifies a catalog: the editor sends back the revision it was loaded with.
+pub fn revision(catalog: &TypeCatalog) -> String {
+    let json = serde_json::to_vec(&editor_types(catalog)).unwrap_or_default();
+    crate::crypto::sha256(&json)
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Wire form of a catalog for the editor.
@@ -193,23 +209,30 @@ fn editor_types(catalog: &TypeCatalog) -> Vec<Value> {
 
 impl TypeAdmin {
     pub fn new(db: Db, registry: Arc<TypeRegistry>, store: Arc<dyn CalendarStore>) -> Arc<Self> {
+        Self::with_retry_delay(db, registry, store, Duration::from_secs(2))
+    }
+
+    /// `new` with another pause between the attempts of a failing pass (tests use none).
+    pub fn with_retry_delay(
+        db: Db,
+        registry: Arc<TypeRegistry>,
+        store: Arc<dyn CalendarStore>,
+        retry_delay: Duration,
+    ) -> Arc<Self> {
         Arc::new(TypeAdmin {
             db,
             registry,
             store,
             lock: Mutex::new(()),
-            retry_delay: Duration::from_secs(2),
+            retry_delay,
         })
     }
 
-    /// Same admin with another retry pause (tests).
-    pub fn with_retry_delay(self: Arc<Self>, retry_delay: Duration) -> Arc<Self> {
-        match Arc::try_unwrap(self) {
-            Ok(mut admin) => {
-                admin.retry_delay = retry_delay;
-                Arc::new(admin)
-            }
-            Err(shared) => shared,
+    /// Refuses a save made from an editor loaded before the catalog last changed.
+    pub fn check_revision(&self, loaded: Option<&str>) -> Result<(), TypeAdminError> {
+        match loaded {
+            Some(rev) if rev != revision(&self.registry.current()) => Err(TypeAdminError::Stale),
+            _ => Ok(()),
         }
     }
 
@@ -239,6 +262,7 @@ impl TypeAdmin {
                 .collect::<Vec<_>>(),
             "max_custom": MAX_CUSTOM,
             "max_name": MAX_NAME,
+            "revision": revision(&catalog),
             "free_colors": catalog.free_colors(),
             "types": editor_types(&catalog),
             "migration": migration,
@@ -382,14 +406,25 @@ impl TypeAdmin {
         let mut last_error = None;
         for attempt in 1..=ATTEMPTS {
             match self.store.recolor(id, mapping, target).await {
-                Ok(patched) => {
+                Ok(report) => {
                     self.persist(target).await?;
                     self.registry.set(target.clone());
                     self.store.invalidate_cache();
-                    self.finish_migration(id, "done", Some(patched), None)
+                    let note = (report.skipped > 0).then(|| {
+                        format!(
+                            "{} event(s) could not be recolored and were left as they were",
+                            report.skipped
+                        )
+                    });
+                    self.finish_migration(id, "done", Some(report.patched), note)
                         .await?;
                     self.registry.set_migrating(false);
-                    tracing::info!(migration = id, patched, "type migration finished");
+                    tracing::info!(
+                        migration = id,
+                        patched = report.patched,
+                        skipped = report.skipped,
+                        "type migration finished"
+                    );
                     return Ok(());
                 }
                 Err(e) => {
@@ -530,6 +565,99 @@ mod tests {
             .iter()
             .filter(|d| d.kind.is_custom())
             .count()
+    }
+
+    /// A calendar store whose color rewrites fail while the "outage" lasts.
+    struct Outage {
+        inner: Arc<DemoStore>,
+        down: std::sync::atomic::AtomicBool,
+    }
+
+    impl Outage {
+        fn new(inner: Arc<DemoStore>) -> Self {
+            Outage {
+                inner,
+                down: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        fn set(&self, down: bool) {
+            self.down.store(down, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CalendarStore for Outage {
+        fn timezone(&self) -> chrono_tz::Tz {
+            self.inner.timezone()
+        }
+        async fn list_year(&self, year: i32) -> annee_gcal::StoreResult<Vec<annee_domain::Event>> {
+            self.inner.list_year(year).await
+        }
+        async fn get(
+            &self,
+            id: &annee_domain::EventId,
+        ) -> annee_gcal::StoreResult<annee_domain::Event> {
+            self.inner.get(id).await
+        }
+        async fn create(
+            &self,
+            new: &annee_domain::NewEvent,
+            writer: &str,
+        ) -> annee_gcal::StoreResult<annee_domain::Event> {
+            self.inner.create(new, writer).await
+        }
+        async fn update(
+            &self,
+            id: &annee_domain::EventId,
+            new: &annee_domain::NewEvent,
+            writer: &str,
+        ) -> annee_gcal::StoreResult<annee_domain::Event> {
+            self.inner.update(id, new, writer).await
+        }
+        async fn delete(
+            &self,
+            id: &annee_domain::EventId,
+        ) -> annee_gcal::StoreResult<annee_gcal::DeleteScope> {
+            self.inner.delete(id).await
+        }
+        async fn list_imported(
+            &self,
+            from: chrono::NaiveDate,
+            to: chrono::NaiveDate,
+        ) -> annee_gcal::StoreResult<Vec<annee_domain::Event>> {
+            self.inner.list_imported(from, to).await
+        }
+        async fn create_imported(
+            &self,
+            e: &annee_gcal::ImportedEvent,
+        ) -> annee_gcal::StoreResult<()> {
+            self.inner.create_imported(e).await
+        }
+        async fn update_imported(
+            &self,
+            id: &annee_domain::EventId,
+            e: &annee_gcal::ImportedEvent,
+        ) -> annee_gcal::StoreResult<()> {
+            self.inner.update_imported(id, e).await
+        }
+        async fn delete_imported(&self, id: &annee_domain::EventId) -> annee_gcal::StoreResult<()> {
+            self.inner.delete_imported(id).await
+        }
+        async fn count_colors(&self) -> annee_gcal::StoreResult<BTreeMap<String, usize>> {
+            self.inner.count_colors().await
+        }
+        async fn recolor(
+            &self,
+            migration_id: &str,
+            mapping: &BTreeMap<String, Option<String>>,
+            target: &TypeCatalog,
+        ) -> annee_gcal::StoreResult<annee_gcal::RecolorReport> {
+            if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(StoreError::Upstream("simulated outage".into()));
+            }
+            self.inner.recolor(migration_id, mapping, target).await
+        }
     }
 
     fn names(s: &str) -> Names {
@@ -696,12 +824,19 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_pass_keeps_writes_blocked_and_only_its_own_target_may_go_on() {
-        let (admin, registry, demo) = admin().await;
-        let admin = admin.with_retry_delay(Duration::ZERO);
+        let db = Db::memory().await.unwrap();
+        let registry = Arc::new(TypeRegistry::new(load_catalog(&db).await));
+        let demo = Arc::new(
+            DemoStore::new(chrono_tz::Europe::Paris, vec!["Alex".into()])
+                .with_registry(registry.clone()),
+        );
+        let outage = Arc::new(Outage::new(demo));
+        let admin =
+            TypeAdmin::with_retry_delay(db, registry.clone(), outage.clone(), Duration::ZERO);
         let old = registry.current();
         let target = recolored_trip(&old, "6");
 
-        demo.set_fail_recolor(true);
+        outage.set(true);
         assert!(matches!(
             admin.apply(target.clone()).await,
             Err(TypeAdminError::Store(_))
@@ -726,7 +861,7 @@ mod tests {
 
         // Resuming while the outage lasts fails again; once it is over, the migration completes.
         assert!(admin.resume().await.is_err());
-        demo.set_fail_recolor(false);
+        outage.set(false);
         assert!(admin.resume().await.unwrap());
         assert_eq!(*registry.current(), target);
         assert!(!registry.is_migrating());
@@ -741,7 +876,7 @@ mod tests {
         let target = recolored_trip(&registry.current(), "6");
         let mapping = registry.current().color_mapping(&target);
         admin.record_migration(&target, &mapping).await.unwrap();
-        assert!(has_unfinished_migration(&admin.db).await);
+        assert!(has_unfinished_migration(&admin.db).await.unwrap());
 
         admin.resume_at_startup().await;
         assert!(registry.is_migrating(), "writes are refused straight away");
@@ -753,7 +888,7 @@ mod tests {
         }
         assert!(!registry.is_migrating());
         assert_eq!(*registry.current(), target);
-        assert!(!has_unfinished_migration(&admin.db).await);
+        assert!(!has_unfinished_migration(&admin.db).await.unwrap());
     }
 
     #[tokio::test]

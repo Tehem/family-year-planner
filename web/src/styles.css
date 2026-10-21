@@ -259,6 +259,7 @@ main.settings{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:colu
   padding:.45rem .55rem;font-size:.85rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .run-success{color:var(--c-stay);font-weight:700}
 .run-failed{color:var(--c-holiday);font-weight:700}
+.run-skipped{color:var(--muted);font-weight:700}
 .run-running{color:var(--c-trip);font-weight:700}
 dialog .muted{margin:0 0 .8rem}
 

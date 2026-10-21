@@ -87,13 +87,6 @@ impl EventType {
         EventType::DaycareClosure,
     ];
 
-    /// The custom type of `slot`, if the slot exists.
-    pub fn custom(slot: u8) -> Option<Self> {
-        (1..=MAX_CUSTOM)
-            .contains(&slot)
-            .then_some(EventType::Custom(slot))
-    }
-
     pub fn is_custom(self) -> bool {
         matches!(self, EventType::Custom(_))
     }
