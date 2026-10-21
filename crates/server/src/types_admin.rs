@@ -112,8 +112,9 @@ pub struct TypeAdmin {
 pub fn catalog_from_input(types: Vec<TypeInput>) -> Result<TypeCatalog, CatalogError> {
     let mut defs = Vec::with_capacity(types.len());
     for t in types {
-        let kind =
-            EventType::from_code(&t.code).ok_or_else(|| CatalogError::UnknownType(t.code))?;
+        let Some(kind) = EventType::from_code(&t.code) else {
+            return Err(CatalogError::UnknownType(t.code));
+        };
         defs.push(TypeDef {
             kind,
             color_id: t.color_id.filter(|c| !c.trim().is_empty()),
