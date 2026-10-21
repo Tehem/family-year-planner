@@ -105,6 +105,8 @@ test.describe("Catégories", () => {
   });
 
   test("two types can swap their colors", async ({ page }) => {
+    await page.goto("/"); // the demo store seeds a year when it is first read: events exist to recolor
+    await expect(page.locator(".bar").first()).toBeVisible();
     await openTypes(page);
     await card(page, "trip").locator("select").selectOption("11");
     await card(page, "family_gathering").locator("select").selectOption("9");
