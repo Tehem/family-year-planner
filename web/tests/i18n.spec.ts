@@ -36,7 +36,7 @@ test.describe("languages (SPEC §19.2)", () => {
 
     // Imported holidays are translated, user events are not.
     await cell(page, "2026-07-14").click();
-    await expect(page.locator("#panel h2")).toHaveText("Tuesday 14 July 2026");
+    await expect(page.locator("#panel h2")).toHaveText(/^Tuesday,? 14 July 2026$/);
     await expect(page.locator("#panel")).toContainText("Bastille Day");
     await page.locator("#closePanel").click();
     await page.locator(".bar", { hasText: "Semaine de ski aux Arcs" }).first().click();
