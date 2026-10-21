@@ -60,6 +60,29 @@ pub enum TokenError {
     Database(String),
 }
 
+impl TokenError {
+    /// The message in `lang` (the `Display` text is the French one).
+    pub fn message(&self, lang: annee_domain::Lang) -> String {
+        match self {
+            TokenError::NameRequired => {
+                lang.pick("Donnez un nom au jeton.", "Give the token a name.")
+            }
+            TokenError::NameTooLong => lang.pick(
+                "Le nom est trop long (60 caractères maximum).",
+                "The name is too long (60 characters maximum).",
+            ),
+            TokenError::NameTaken => lang.pick(
+                "Un jeton actif porte déjà ce nom.",
+                "An active token already has this name.",
+            ),
+            TokenError::Database(_) => {
+                lang.pick("Une erreur est survenue.", "Something went wrong.")
+            }
+        }
+        .to_string()
+    }
+}
+
 impl From<sqlx::Error> for TokenError {
     fn from(e: sqlx::Error) -> Self {
         match &e {

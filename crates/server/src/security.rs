@@ -65,7 +65,7 @@ pub fn origin_ok(state: &AppState, headers: &HeaderMap) -> bool {
 }
 
 fn csrf_error() -> Response {
-    ApiError::forbidden("Requête refusée.").into_response()
+    ApiError::forbidden(crate::i18n::tr("Requête refusée.", "Request refused.")).into_response()
 }
 
 /// Guard for `/api`: mutating requests need `X-Requested-With: annee` and a same-origin `Origin`.

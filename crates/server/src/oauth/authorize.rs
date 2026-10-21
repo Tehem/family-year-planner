@@ -13,6 +13,7 @@ use html_escape::{encode_double_quoted_attribute as attr, encode_text as text};
 use super::clients::{Client, ClientError, is_loopback_uri, redirect_host, redirect_matches};
 use super::{CODE_MINUTES, SCOPE_OFFLINE, SCOPE_READ, SCOPE_WRITE};
 use crate::crypto::{ct_eq, random_token, sha256};
+use crate::i18n::{current, tr};
 use crate::security::origin_ok;
 use crate::session::{build_cookie, clear_cookie, read_session};
 use crate::state::AppState;
@@ -32,7 +33,7 @@ struct Request {
 
 enum Failure {
     /// Never redirect: the client or redirect URI cannot be trusted.
-    Page(StatusCode, &'static str),
+    Page(StatusCode, String),
     /// Redirect back to the (validated) redirect URI with an OAuth error.
     Redirect {
         to: String,
@@ -84,7 +85,10 @@ async fn validate(state: &AppState, p: &HashMap<String, String>) -> Result<Reque
     let Some(client_id) = p.get("client_id") else {
         return Err(Failure::Page(
             StatusCode::BAD_REQUEST,
-            "Application inconnue : client_id manquant.",
+            tr(
+                "Application inconnue : client_id manquant.",
+                "Unknown application: client_id is missing.",
+            ),
         ));
     };
     let client = match svc.clients.get(client_id).await {
@@ -92,26 +96,38 @@ async fn validate(state: &AppState, p: &HashMap<String, String>) -> Result<Reque
         Ok(None) | Err(ClientError::Invalid(..)) => {
             return Err(Failure::Page(
                 StatusCode::BAD_REQUEST,
-                "Cette application n’est pas reconnue.",
+                tr(
+                    "Cette application n’est pas reconnue.",
+                    "This application is not recognized.",
+                ),
             ));
         }
         Err(_) => {
             return Err(Failure::Page(
                 StatusCode::BAD_GATEWAY,
-                "Impossible de vérifier cette application. Réessayez dans un instant.",
+                tr(
+                    "Impossible de vérifier cette application. Réessayez dans un instant.",
+                    "Unable to verify this application. Try again in a moment.",
+                ),
             ));
         }
     };
     let Some(redirect_uri) = p.get("redirect_uri") else {
         return Err(Failure::Page(
             StatusCode::BAD_REQUEST,
-            "Adresse de redirection manquante.",
+            tr(
+                "Adresse de redirection manquante.",
+                "The redirect address is missing.",
+            ),
         ));
     };
     if !redirect_matches(&client.redirect_uris, redirect_uri) {
         return Err(Failure::Page(
             StatusCode::BAD_REQUEST,
-            "Adresse de redirection non autorisée pour cette application.",
+            tr(
+                "Adresse de redirection non autorisée pour cette application.",
+                "This redirect address is not allowed for this application.",
+            ),
         ));
     }
     let state_param = p.get("state").cloned();
@@ -156,6 +172,26 @@ async fn validate(state: &AppState, p: &HashMap<String, String>) -> Result<Reque
     })
 }
 
+/// The page shell is authored in French: set its language and title for the request.
+fn localize_shell(html: &str) -> String {
+    let lang = current();
+    html.replace("<html lang=\"fr\">", &format!("<html lang=\"{lang}\">"))
+        .replace(
+            "Autorisation – Année en famille",
+            lang.pick(
+                "Autorisation – Année en famille",
+                "Authorization – Family year",
+            ),
+        )
+        .replace(
+            "<title>Année en famille</title>",
+            &format!(
+                "<title>{}</title>",
+                lang.pick("Année en famille", "Family year")
+            ),
+        )
+}
+
 fn page(status: StatusCode, body_html: &str) -> Response {
     let tpl = web::template("consent.html").unwrap_or_else(|| web::FALLBACK_TEMPLATE.to_string());
     let html = if tpl.contains("<!--BODY-->") {
@@ -163,6 +199,7 @@ fn page(status: StatusCode, body_html: &str) -> Response {
     } else {
         tpl
     };
+    let html = localize_shell(&html);
     let mut res = (status, html).into_response();
     let h = res.headers_mut();
     h.insert(
@@ -177,15 +214,20 @@ fn error_page(status: StatusCode, message: &str) -> Response {
     page(
         status,
         &format!(
-            "<h1>Année en famille</h1><p class=\"lead\">{}</p><p class=\"hint\">Fermez cette page et recommencez depuis l’application.</p>",
-            text(message)
+            "<h1>{}</h1><p class=\"lead\">{}</p><p class=\"hint\">{}</p>",
+            tr("Année en famille", "Family year"),
+            text(message),
+            tr(
+                "Fermez cette page et recommencez depuis l’application.",
+                "Close this page and start again from the application."
+            )
         ),
     )
 }
 
 fn failure_response(state: &AppState, f: Failure) -> Response {
     match f {
-        Failure::Page(status, msg) => error_page(status, msg),
+        Failure::Page(status, msg) => error_page(status, &msg),
         Failure::Redirect {
             to,
             error,
@@ -231,26 +273,50 @@ fn consent_html(
         attr(csrf)
     ));
     let warning = if is_loopback_uri(&req.redirect_uri) {
-        "<p class=\"warn\">Cette application tourne sur un ordinateur (adresse locale). Ne continuez que si vous venez de la lancer.</p>"
+        tr(
+            "<p class=\"warn\">Cette application tourne sur un ordinateur (adresse locale). Ne continuez que si vous venez de la lancer.</p>",
+            "<p class=\"warn\">This application runs on a computer (local address). Only continue if you have just started it.</p>",
+        )
     } else {
-        ""
+        String::new()
     };
     format!(
-        "<h1>Année en famille</h1>\
-         <p class=\"lead\"><strong>{name}</strong> demande l’accès à l’agenda familial.</p>\
-         <ul class=\"perms\"><li>Voir les événements</li>{write}</ul>\
-         <p class=\"redirect\">Vous serez redirigé vers <strong>{host}</strong></p>{warning}\
-         <p class=\"who\">Connecté en tant que {email}</p>\
+        "<h1>{title}</h1>\
+         <p class=\"lead\">{lead}</p>\
+         <ul class=\"perms\"><li>{see}</li>{write}</ul>\
+         <p class=\"redirect\">{redirect} <strong>{host}</strong></p>{warning}\
+         <p class=\"who\">{who} {email}</p>\
          <form method=\"post\" action=\"/oauth/authorize\">{hidden}\
          <div class=\"dlg-actions\">\
-         <button type=\"submit\" name=\"decision\" value=\"deny\" class=\"btn ghost\">Refuser</button>\
-         <button type=\"submit\" name=\"decision\" value=\"approve\" class=\"btn\">Autoriser</button>\
+         <button type=\"submit\" name=\"decision\" value=\"deny\" class=\"btn ghost\">{deny}</button>\
+         <button type=\"submit\" name=\"decision\" value=\"approve\" class=\"btn\">{approve}</button>\
          </div></form>",
-        name = text(&req.client.client_name),
+        title = tr("Année en famille", "Family year"),
+        lead = tr(
+            &format!(
+                "<strong>{}</strong> demande l’accès à l’agenda familial.",
+                text(&req.client.client_name)
+            ),
+            &format!(
+                "<strong>{}</strong> is asking for access to the family calendar.",
+                text(&req.client.client_name)
+            ),
+        ),
+        see = tr("Voir les événements", "See the events"),
+        redirect = tr("Vous serez redirigé vers", "You will be redirected to"),
+        who = tr("Connecté en tant que", "Signed in as"),
+        deny = tr("Refuser", "Deny"),
+        approve = tr("Autoriser", "Allow"),
         write = if write {
-            "<li>Ajouter, modifier et supprimer des événements</li>"
+            format!(
+                "<li>{}</li>",
+                tr(
+                    "Ajouter, modifier et supprimer des événements",
+                    "Add, edit and delete events"
+                )
+            )
         } else {
-            ""
+            String::new()
         },
         host = text(&redirect_host(&req.redirect_uri)),
         email = text(email),
@@ -315,7 +381,10 @@ async fn decide_inner(
     body: Bytes,
 ) -> Response {
     if !origin_ok(&state, &headers) {
-        return error_page(StatusCode::FORBIDDEN, "Requête refusée.");
+        return error_page(
+            StatusCode::FORBIDDEN,
+            &tr("Requête refusée.", "Request refused."),
+        );
     }
     let mut params: HashMap<String, String> = HashMap::new();
     for (k, v) in url::form_urlencoded::parse(&body) {
@@ -324,7 +393,10 @@ async fn decide_inner(
     let Some(session) = read_session(&state, &headers) else {
         return error_page(
             StatusCode::UNAUTHORIZED,
-            "Votre session a expiré. Recommencez depuis l’application.",
+            &tr(
+                "Votre session a expiré. Recommencez depuis l’application.",
+                "Your session has expired. Start again from the application.",
+            ),
         );
     };
     let cookie_csrf = jar
@@ -334,7 +406,14 @@ async fn decide_inner(
     let form_csrf = params.get("csrf").cloned().unwrap_or_default();
     let jar = jar.remove(clear_cookie(&state, CONSENT_COOKIE));
     if cookie_csrf.is_empty() || !ct_eq(cookie_csrf.as_bytes(), form_csrf.as_bytes()) {
-        return (jar, error_page(StatusCode::FORBIDDEN, "Requête refusée.")).into_response();
+        return (
+            jar,
+            error_page(
+                StatusCode::FORBIDDEN,
+                &tr("Requête refusée.", "Request refused."),
+            ),
+        )
+            .into_response();
     }
     let req = match validate(&state, &params).await {
         Ok(r) => r,

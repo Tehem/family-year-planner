@@ -91,6 +91,9 @@ pub trait CalendarStore: Send + Sync {
         target: &TypeCatalog,
     ) -> StoreResult<usize>;
 
+    /// Forget cached reads (the type catalog changed, so cached events carry stale types).
+    fn invalidate_cache(&self) {}
+
     /// Events overlapping `[from, to]`, sorted by start (then title), without duplicates.
     async fn list_range(&self, from: NaiveDate, to: NaiveDate) -> StoreResult<Vec<Event>> {
         let mut out: Vec<Event> = Vec::new();

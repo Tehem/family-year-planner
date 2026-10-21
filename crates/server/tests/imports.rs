@@ -265,6 +265,7 @@ async fn manual_events_are_never_touched() {
         &annee_domain::ValidationContext {
             members: &m,
             today: today(),
+            catalog: &annee_domain::TypeCatalog::default(),
         },
     )
     .unwrap();
@@ -397,7 +398,12 @@ async fn http_source_recovers_after_a_transient_failure() {
 
 async fn service(store: Arc<DemoStore>, education: Arc<dyn EducationSource>) -> Arc<ImportService> {
     let db = Db::memory().await.unwrap();
-    ImportService::new(importer(store, education), db, Arc::new(today))
+    ImportService::new(
+        importer(store, education),
+        db,
+        Arc::new(annee_gcal::TypeRegistry::default()),
+        Arc::new(today),
+    )
 }
 
 #[tokio::test]

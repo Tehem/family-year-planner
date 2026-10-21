@@ -77,11 +77,6 @@ impl GoogleStore {
         self
     }
 
-    /// Drop the cached years (the catalog changed, so cached events carry stale types).
-    pub fn clear_cache(&self) {
-        self.invalidate();
-    }
-
     pub fn client(&self) -> &Client {
         &self.client
     }
@@ -355,6 +350,10 @@ impl CalendarStore for GoogleStore {
         self.client.delete(id.calendar, &id.google_id).await?;
         self.invalidate();
         Ok(())
+    }
+
+    fn invalidate_cache(&self) {
+        self.invalidate();
     }
 
     async fn count_colors(&self) -> StoreResult<BTreeMap<String, usize>> {

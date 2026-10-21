@@ -33,6 +33,9 @@ pub struct AppSection {
     pub allowed_emails: Vec<String>,
     #[serde(default)]
     pub user_names: BTreeMap<String, String>,
+    /// `fr` or `en` (§19.2).
+    #[serde(default = "default_language")]
+    pub default_language: String,
 }
 
 impl Default for AppSection {
@@ -42,10 +45,14 @@ impl Default for AppSection {
             timezone: default_timezone(),
             allowed_emails: Vec::new(),
             user_names: BTreeMap::new(),
+            default_language: default_language(),
         }
     }
 }
 
+fn default_language() -> String {
+    "fr".to_string()
+}
 fn default_base_url() -> String {
     "http://localhost:8080".to_string()
 }
@@ -205,6 +212,11 @@ impl AppConfig {
         }
     }
 
+    /// Language used when a request carries no language cookie (§19.2).
+    pub fn default_lang(&self) -> annee_domain::Lang {
+        annee_domain::Lang::parse(&self.app.default_language).unwrap_or_default()
+    }
+
     pub fn secure_cookies(&self) -> bool {
         self.app.base_url.starts_with("https://")
     }
@@ -241,6 +253,9 @@ impl AppConfig {
                 "app.base_url must start with http:// or https:// and have no trailing slash"
                     .to_string(),
             );
+        }
+        if annee_domain::Lang::parse(&self.app.default_language).is_none() {
+            problems.push("app.default_language must be \"fr\" or \"en\"".into());
         }
         if self.app.timezone.parse::<Tz>().is_err() {
             problems.push(format!(

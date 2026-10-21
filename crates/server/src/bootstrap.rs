@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use annee_gcal::google::auth::{ServiceAccountAuth, ServiceAccountKey};
-use annee_gcal::{CalendarStore, GoogleConfig, GoogleStore};
+use annee_gcal::{CalendarStore, GoogleConfig, GoogleStore, TypeRegistry};
 use anyhow::{Context, anyhow};
 use axum_extra::extract::cookie::Key;
 use base64::Engine;
@@ -17,6 +17,7 @@ use crate::ratelimit::Limits;
 use crate::state::{AppState, Inner, import_service};
 use crate::storage::Db;
 use crate::tokens::Tokens;
+use crate::types_admin::{TypeAdmin, load_catalog};
 
 pub fn load_config(env: &Env) -> anyhow::Result<AppConfig> {
     let config =
@@ -49,7 +50,11 @@ pub fn cookie_key(env: &Env) -> anyhow::Result<Key> {
 }
 
 /// A Google store built from the service account key file.
-pub fn google_store(env: &Env, config: &AppConfig) -> anyhow::Result<GoogleStore> {
+pub fn google_store(
+    env: &Env,
+    config: &AppConfig,
+    types: Arc<TypeRegistry>,
+) -> anyhow::Result<GoogleStore> {
     let path = env.service_account_file.as_ref().ok_or_else(|| {
         anyhow!("missing required environment variable(s): GOOGLE_SERVICE_ACCOUNT_FILE")
     })?;
@@ -62,7 +67,7 @@ pub fn google_store(env: &Env, config: &AppConfig) -> anyhow::Result<GoogleStore
         config.tz(),
         config.family.members.clone(),
     );
-    Ok(GoogleStore::new(cfg, http, Arc::new(auth)))
+    Ok(GoogleStore::new(cfg, http, Arc::new(auth)).with_registry(types))
 }
 
 pub async fn build_state(env: &Env, config: AppConfig) -> anyhow::Result<AppState> {
@@ -74,10 +79,12 @@ pub async fn build_state(env: &Env, config: AppConfig) -> anyhow::Result<AppStat
             let base_url = config.app.base_url.clone();
             let keys = TokenKeys::from_base64(env.oauth_signing_key.as_deref().unwrap_or_default())
                 .map_err(|e| anyhow!(e))?;
-            let store: Arc<dyn CalendarStore> = Arc::new(google_store(env, &config)?);
             let db = Db::connect(&env.database_url)
                 .await
                 .context("cannot open the database")?;
+            let types = Arc::new(TypeRegistry::new(load_catalog(&db).await));
+            let store: Arc<dyn CalendarStore> =
+                Arc::new(google_store(env, &config, types.clone())?);
             let education = Arc::new(HttpEducation::new(http_client()?));
             let oidc = Arc::new(GoogleOidc::new(
                 http_client()?,
@@ -85,7 +92,15 @@ pub async fn build_state(env: &Env, config: AppConfig) -> anyhow::Result<AppStat
                 env.google_client_secret.clone().unwrap_or_default(),
                 Endpoints::default(),
             ));
-            let imports = import_service(&config, store.clone(), education, db.clone(), None);
+            let imports = import_service(
+                &config,
+                store.clone(),
+                education,
+                db.clone(),
+                None,
+                types.clone(),
+            );
+            let type_admin = TypeAdmin::new(db.clone(), types.clone(), store.clone());
             Ok(AppState::new(Inner {
                 config,
                 mode: Mode::Prod,
@@ -99,6 +114,8 @@ pub async fn build_state(env: &Env, config: AppConfig) -> anyhow::Result<AppStat
                 imports,
                 oidc: Some(oidc),
                 limits: Limits::standard(),
+                types,
+                type_admin,
             }))
         }
     }
@@ -110,6 +127,7 @@ pub async fn start_background(
 ) -> anyhow::Result<Option<tokio_cron_scheduler::JobScheduler>> {
     crate::oauth::spawn_housekeeping(state.clone());
     state.imports.recover_interrupted().await?;
+    state.type_admin.resume_at_startup().await;
     if state.is_demo() {
         return Ok(None); // demo data is seeded; imports are manual there
     }

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use annee_gcal::{CalendarStore, DemoStore};
+use annee_gcal::{CalendarStore, DemoStore, TypeRegistry};
 use anyhow::anyhow;
 use chrono::Utc;
 
@@ -12,6 +12,7 @@ use crate::imports::education::{EducationSource, FixtureEducation, HttpEducation
 use crate::imports::{ImportService, Importer};
 use crate::state::import_service;
 use crate::storage::Db;
+use crate::types_admin::load_catalog;
 
 /// `annee import [--dry-run]`.
 pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
@@ -19,13 +20,22 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
     let config = load_config(&env)?;
     env.require_prod_secrets(&["GOOGLE_SERVICE_ACCOUNT_FILE"])
         .map_err(|e| anyhow!(e))?;
+    let db = match env.mode {
+        Mode::Demo => Db::memory().await?,
+        Mode::Prod => Db::connect(&env.database_url).await?,
+    };
+    // Imported events take the colors of the configured type catalog (§19).
+    let types = Arc::new(TypeRegistry::new(load_catalog(&db).await));
     let (store, education): (Arc<dyn CalendarStore>, Arc<dyn EducationSource>) = match env.mode {
         Mode::Demo => (
-            Arc::new(DemoStore::new(config.tz(), config.family.members.clone())),
+            Arc::new(
+                DemoStore::new(config.tz(), config.family.members.clone())
+                    .with_registry(types.clone()),
+            ),
             Arc::new(FixtureEducation),
         ),
         Mode::Prod => (
-            Arc::new(google_store(&env, &config)?),
+            Arc::new(google_store(&env, &config, types.clone())?),
             Arc::new(HttpEducation::new(http_client()?)),
         ),
     };
@@ -47,11 +57,8 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let db = match env.mode {
-        Mode::Demo => Db::memory().await?,
-        Mode::Prod => Db::connect(&env.database_url).await?,
-    };
-    let service: Arc<ImportService> = import_service(&config, store, education, db, env.fake_today);
+    let service: Arc<ImportService> =
+        import_service(&config, store, education, db, env.fake_today, types);
     let run = service
         .run("cli")
         .await
@@ -121,7 +128,7 @@ pub async fn check_config() -> anyhow::Result<()> {
         ));
     }
 
-    let store = match google_store(&env, &config) {
+    let store = match google_store(&env, &config, Arc::new(TypeRegistry::default())) {
         Ok(s) => {
             checks.report(true, "service account key", String::new());
             s

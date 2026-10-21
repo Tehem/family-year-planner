@@ -10,7 +10,7 @@ use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 use crate::state::AppState;
-use crate::{api, google_login, mcp, oauth, pages, security, session, web};
+use crate::{api, google_login, i18n, mcp, oauth, pages, security, session, web};
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -25,6 +25,10 @@ pub fn router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             state.clone(),
             session::renew_session,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            i18n::lang_layer,
         ))
         .layer(middleware::from_fn(security::security_headers))
         .layer(CompressionLayer::new())

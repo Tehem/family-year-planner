@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use annee_gcal::TypeRegistry;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
@@ -45,16 +46,18 @@ pub struct ImportService {
     db: Db,
     lock: Arc<Mutex<()>>,
     running: Arc<AtomicBool>,
+    types: Arc<TypeRegistry>,
     today: Clock,
 }
 
 impl ImportService {
-    pub fn new(importer: Importer, db: Db, today: Clock) -> Arc<Self> {
+    pub fn new(importer: Importer, db: Db, types: Arc<TypeRegistry>, today: Clock) -> Arc<Self> {
         Arc::new(ImportService {
             importer,
             db,
             lock: Arc::new(Mutex::new(())),
             running: Arc::new(AtomicBool::new(false)),
+            types,
             today,
         })
     }
@@ -143,6 +146,13 @@ impl ImportService {
     }
 
     async fn run_locked(&self, trigger: &str) -> Option<ImportRun> {
+        if self.types.is_migrating() {
+            tracing::warn!(
+                trigger,
+                "import skipped: the type colors are being migrated"
+            );
+            return None;
+        }
         let id = match self.start_run(trigger).await {
             Ok(id) => id,
             Err(e) => {

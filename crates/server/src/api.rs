@@ -1,6 +1,6 @@
 //! JSON API used by the web app (§7).
 
-use annee_domain::{EventInput, EventPatch, TypeInfo};
+use annee_domain::{EventInput, EventPatch};
 use axum::extract::{FromRequest, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::error::ApiError;
+use crate::i18n;
 use crate::security::csrf_guard_api;
 use crate::session::{Member, Principal};
 use crate::state::AppState;
@@ -23,7 +24,10 @@ impl<T: DeserializeOwned, S: Send + Sync> FromRequest<S> for ApiJson<T> {
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<T>::from_request(req, state).await {
             Ok(Json(v)) => Ok(ApiJson(v)),
-            Err(_) => Err(ApiError::bad_request("Requête invalide.")),
+            Err(_) => Err(ApiError::bad_request(i18n::tr(
+                "Requête invalide.",
+                "Invalid request.",
+            ))),
         }
     }
 }
@@ -57,7 +61,9 @@ async fn me(State(s): State<AppState>, p: Principal) -> Json<Value> {
 async fn config(State(s): State<AppState>, _p: Principal) -> Json<Value> {
     Json(json!({
         "members": s.config.family.members,
-        "types": TypeInfo::all(),
+        "lang": i18n::current(),
+        "default_language": s.config.default_lang(),
+        "types": s.types.current().infos(i18n::current()),
         "timezone": s.config.app.timezone,
         "school_zone": s.config.imports.school_zone,
         "today": s.today(),
@@ -82,7 +88,10 @@ async fn list_events(
 ) -> Result<Json<Value>, ApiError> {
     let year = q.year.unwrap_or_else(|| chrono::Datelike::year(&s.today()));
     if !(1900..=2200).contains(&year) {
-        return Err(ApiError::bad_request("Année invalide."));
+        return Err(ApiError::bad_request(i18n::tr(
+            "Année invalide.",
+            "Invalid year.",
+        )));
     }
     let events = s.events_for_year(year).await?;
     Ok(Json(json!({"year": year, "events": events})))
