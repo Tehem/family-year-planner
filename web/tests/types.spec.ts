@@ -50,7 +50,7 @@ test.describe("Catégories", () => {
     await openTypes(page);
     await field(page, "celebration", "en", "plural").fill("Big days");
     await save(page).click();
-    await expect(page.locator("#typesOk")).toBeVisible();
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
     await page.goto("/?lang=en");
     await expect(page.locator('[data-cat="celebration"]')).toHaveText("Big days");
     await page.goto("/?lang=fr");
@@ -111,7 +111,7 @@ test.describe("Catégories", () => {
     await expect(card(page, "trip").locator(".type-dup")).toHaveText("");
     await save(page).click();
     await page.getByRole("dialog").getByRole("button", { name: "Appliquer" }).click();
-    await expect(page.locator("#typesOk")).toBeVisible();
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
     await page.goto("/");
     expect(await barColor(page, "Semaine de ski aux Arcs")).toBe("rgb(229, 83, 61)"); // trip is Tomate now
   });
@@ -160,7 +160,7 @@ test.describe("Catégories", () => {
     const dlg = page.getByRole("dialog");
     await expect(dlg).toContainText("1 événement(s) deviendront « Non classés ».");
     await dlg.getByRole("button", { name: "Appliquer" }).click();
-    await expect(page.locator("#typesOk")).toBeVisible();
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
     await page.goto("/");
     await expect(page.locator('[data-cat="custom_1"]')).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Non classés" })).toBeVisible();
@@ -176,7 +176,7 @@ test.describe("Catégories", () => {
     await expect(page.getByText("Trois catégories ajoutées au maximum")).toBeVisible();
     await expect(save(page)).toBeEnabled();
     await save(page).click();
-    await expect(page.locator("#typesOk")).toBeVisible();
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
     await page.goto("/");
     await expect(page.locator("#legend [data-cat]")).toHaveCount(11);
   });
@@ -185,7 +185,7 @@ test.describe("Catégories", () => {
     await openTypes(page);
     await field(page, "trip", "fr", "plural").fill("Escapades");
     await save(page).click();
-    await expect(page.locator("#typesOk")).toBeVisible();
+    await expect(page.locator("#typesOk")).toHaveText("Catégories enregistrées.");
     await resetDemo(request);
     await openTypes(page);
     await expect(field(page, "trip", "fr", "plural")).toHaveValue("Voyages & vacances");
