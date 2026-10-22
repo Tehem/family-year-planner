@@ -10,7 +10,7 @@ use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 use crate::state::AppState;
-use crate::{api, google_login, mcp, oauth, pages, security, session, web};
+use crate::{api, google_login, i18n, mcp, oauth, pages, security, session, web};
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -26,6 +26,10 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             session::renew_session,
         ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            i18n::lang_layer,
+        ))
         .layer(middleware::from_fn(security::security_headers))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http().on_response(DefaultOnResponse::new().level(Level::INFO)))
@@ -33,7 +37,12 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn healthz(State(s): State<AppState>) -> Json<Value> {
-    Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION"), "mode": s.mode.as_str()}))
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "mode": s.mode.as_str(),
+        "default_language": s.config.default_lang(),
+    }))
 }
 
 async fn asset(Path(path): Path<String>) -> Response {

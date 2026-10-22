@@ -1,25 +1,94 @@
-//! Admin API (`/api/admin/*`): tokens, OAuth grants, imports.
+//! Admin API (`/api/admin/*`): tokens, OAuth grants, imports, type catalog.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::api::ApiJson;
 use crate::error::ApiError;
+use crate::i18n::{current, tr};
 use crate::session::Member;
 use crate::state::AppState;
 use crate::tokens::{Scope, TokenError};
+use crate::types_admin::{TypeAdminError, TypesBody, catalog_from_input};
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/import", get(import_status).post(import_now))
         .route("/admin/tokens", get(list_tokens).post(create_token))
         .route("/admin/tokens/{id}", delete(revoke_token))
+        .route("/admin/types", get(types_get).put(types_put))
+        .route("/admin/types/resume", post(types_resume))
         .route("/admin/oauth-grants", get(list_grants))
         .route("/admin/oauth-grants/{id}", delete(revoke_grant))
+}
+
+impl From<TypeAdminError> for ApiError {
+    fn from(e: TypeAdminError) -> Self {
+        match e {
+            TypeAdminError::Catalog(c) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "validation_failed",
+                c.message(current()),
+            ),
+            TypeAdminError::Store(s) => s.into(),
+            TypeAdminError::Busy => crate::error::migrating(),
+            TypeAdminError::Stale => ApiError::new(
+                StatusCode::CONFLICT,
+                "stale_catalog",
+                tr(
+                    "Les catégories ont été modifiées entre-temps. Rechargez la page.",
+                    "The categories were modified in the meantime. Reload the page.",
+                ),
+            ),
+            TypeAdminError::Pending => ApiError::new(
+                StatusCode::CONFLICT,
+                "migration_pending",
+                tr(
+                    "Une modification de couleurs précédente n’est pas terminée : relancez-la d’abord.",
+                    "A previous color change is unfinished: resume it first.",
+                ),
+            ),
+            TypeAdminError::Database(detail) => {
+                tracing::error!(error = %detail, "type catalog storage error");
+                ApiError::internal()
+            }
+        }
+    }
+}
+
+async fn types_get(State(s): State<AppState>, _m: Member) -> Result<Json<Value>, ApiError> {
+    Ok(Json(s.type_admin.describe().await?))
+}
+
+/// Replace the whole catalog; `dry_run` only reports what would be rewritten (§19.5).
+async fn types_put(
+    State(s): State<AppState>,
+    _m: Member,
+    ApiJson(body): ApiJson<TypesBody>,
+) -> Result<Json<Value>, ApiError> {
+    s.type_admin.check_revision(body.revision.as_deref())?;
+    let target = catalog_from_input(body.types).map_err(TypeAdminError::from)?;
+    if body.dry_run {
+        let preview = s.type_admin.preview(&target).await?;
+        return Ok(Json(
+            json!({"changes": preview.changes, "orphans": preview.orphans, "applied": false}),
+        ));
+    }
+    // The preview (a full scan of both calendars) is the dry run's job: the page asks for it first.
+    let skipped = s.type_admin.apply_detached(target).await?;
+    Ok(Json(
+        json!({"changes": [], "orphans": 0, "applied": true, "skipped": skipped}),
+    ))
+}
+
+/// Resume a color migration left unfinished by a failure.
+async fn types_resume(State(s): State<AppState>, _m: Member) -> Result<Json<Value>, ApiError> {
+    let resumed = s.type_admin.resume_detached().await?;
+    Ok(Json(json!({"resumed": resumed})))
 }
 
 impl From<TokenError> for ApiError {
@@ -30,9 +99,13 @@ impl From<TokenError> for ApiError {
                 ApiError::internal()
             }
             TokenError::NameTaken => {
-                ApiError::new(StatusCode::CONFLICT, "name_taken", e.to_string())
+                ApiError::new(StatusCode::CONFLICT, "name_taken", e.message(current()))
             }
-            _ => ApiError::new(StatusCode::BAD_REQUEST, "validation_failed", e.to_string()),
+            _ => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "validation_failed",
+                e.message(current()),
+            ),
         }
     }
 }
@@ -60,11 +133,15 @@ async fn create_token(
     m: Member,
     ApiJson(body): ApiJson<NewTokenBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let scope =
-        Scope::parse(&body.scope).ok_or_else(|| ApiError::bad_request("Droits invalides."))?;
+    let scope = Scope::parse(&body.scope)
+        .ok_or_else(|| ApiError::bad_request(tr("Droits invalides.", "Invalid permissions.")))?;
     let mut name = body.name.trim().to_string();
     if name.is_empty() && body.kiosk {
-        name = format!("Kiosque – {}", crate::dates_fr::short_date(s.today()));
+        name = if current() == annee_domain::Lang::En {
+            format!("Kiosk – {}", crate::dates_fr::short_date_en(s.today()))
+        } else {
+            format!("Kiosque – {}", crate::dates_fr::short_date(s.today()))
+        };
     }
     let (pat, clear) = s.tokens.create(&name, scope, body.kiosk, &m.name).await?;
     let mut out = json!({"id": pat.id, "token": clear});

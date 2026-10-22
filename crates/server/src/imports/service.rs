@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use annee_gcal::TypeRegistry;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
@@ -12,6 +13,9 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use super::{ImportCounts, Importer};
 use crate::storage::{Db, now_ts};
+
+/// `error` of a run that did not start because a category color migration was running.
+pub const SKIPPED_MIGRATING: &str = "skipped:migrating";
 
 /// Re-run at startup when the last success is older than this.
 const STALE_AFTER_DAYS: i64 = 31;
@@ -45,16 +49,18 @@ pub struct ImportService {
     db: Db,
     lock: Arc<Mutex<()>>,
     running: Arc<AtomicBool>,
+    types: Arc<TypeRegistry>,
     today: Clock,
 }
 
 impl ImportService {
-    pub fn new(importer: Importer, db: Db, today: Clock) -> Arc<Self> {
+    pub fn new(importer: Importer, db: Db, types: Arc<TypeRegistry>, today: Clock) -> Arc<Self> {
         Arc::new(ImportService {
             importer,
             db,
             lock: Arc::new(Mutex::new(())),
             running: Arc::new(AtomicBool::new(false)),
+            types,
             today,
         })
     }
@@ -143,6 +149,14 @@ impl ImportService {
     }
 
     async fn run_locked(&self, trigger: &str) -> Option<ImportRun> {
+        // Held for the whole run: a color migration waits for it, and imports wait for a migration.
+        let Some(_access) = self.types.try_write_access() else {
+            tracing::warn!(
+                trigger,
+                "import skipped: the type colors are being migrated"
+            );
+            return self.record_skipped(trigger).await;
+        };
         let id = match self.start_run(trigger).await {
             Ok(id) => id,
             Err(e) => {
@@ -161,6 +175,16 @@ impl ImportService {
         {
             tracing::error!(error = %e, "cannot record the end of the import run");
         }
+        self.recent_runs(1).await.ok().and_then(|mut v| v.pop())
+    }
+
+    /// A run that could not start is still recorded, so that Réglages shows why nothing happened.
+    async fn record_skipped(&self, trigger: &str) -> Option<ImportRun> {
+        let id = self.start_run(trigger).await.ok()?;
+        // A code, not a sentence: the page translates it ("skipped:" runs are not failures).
+        self.finish_run(id, Err(SKIPPED_MIGRATING.to_string()))
+            .await
+            .ok()?;
         self.recent_runs(1).await.ok().and_then(|mut v| v.pop())
     }
 

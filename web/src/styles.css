@@ -259,6 +259,7 @@ main.settings{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:colu
   padding:.45rem .55rem;font-size:.85rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .run-success{color:var(--c-stay);font-weight:700}
 .run-failed{color:var(--c-holiday);font-weight:700}
+.run-skipped{color:var(--muted);font-weight:700}
 .run-running{color:var(--c-trip);font-weight:700}
 dialog .muted{margin:0 0 .8rem}
 
@@ -268,6 +269,75 @@ body.kiosk{-webkit-user-select:none;user-select:none;overflow:hidden}
 body.kiosk.idle,body.kiosk.idle *{cursor:none!important}
 .offline{position:fixed;right:.8rem;bottom:.6rem;z-index:20;padding:.2rem .6rem;border-radius:999px;font-size:.78rem;
   background:var(--panel);color:var(--muted);border:1px solid var(--line);opacity:.9}
+
+
+/* ---------- 3b. Type palette (SPEC §19.4): one entry per Google colorId ----------
+   `--p<id>-bar` colors a bar, `--p<id>-tint` a cell background. Ids 2, 3, 4, 5, 9, 10 and 11 hold the
+   prototype's colors, so the default catalog renders exactly like the prototype. */
+:root{
+  --p1-bar:#7C86D6; --p1-tint:#D8DCF6;
+  --p2-bar:#5FA37A; --p2-tint:#BDE6B2;
+  --p3-bar:#8B5CF6; --p3-tint:#E2D6FB;
+  --p4-bar:#E4678A; --p4-tint:#F9C6D1;
+  --p5-bar:#C58B00; --p5-tint:#FFE6A3;
+  --p6-bar:#E26E00; --p6-tint:#FFD2A6;
+  --p7-bar:#0FA0DB; --p7-tint:#BDE7F8;
+  --p8-bar:#566070; --p8-tint:#D3D8E0;
+  --p9-bar:#2F7FE0; --p9-tint:#C9DDFB;
+  --p10-bar:#2A9563; --p10-tint:#BFE5D0;
+  --p11-bar:#E5533D; --p11-tint:#F8CBC3;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --p1-bar:#8E98E3; --p1-tint:#2C3057;
+    --p2-bar:#6BB088; --p2-tint:#1F4A27;
+    --p3-bar:#8E63F0; --p3-tint:#3A2A6B;
+    --p4-bar:#E8789A; --p4-tint:#4F1E2B;
+    --p5-bar:#D19A0B; --p5-tint:#4A3D10;
+    --p6-bar:#EE8120; --p6-tint:#5C3A12;
+    --p7-bar:#2DB1E8; --p7-tint:#0F3A4F;
+    --p8-bar:#98A2B3; --p8-tint:#343B48;
+    --p9-bar:#3B82E0; --p9-tint:#1B3A6B;
+    --p10-bar:#2E9E68; --p10-tint:#1A4A33;
+    --p11-bar:#EF6A52; --p11-tint:#5A2219;
+  }
+}
+:root[data-theme="dark"]{
+  --p1-bar:#8E98E3; --p1-tint:#2C3057;
+  --p2-bar:#6BB088; --p2-tint:#1F4A27;
+  --p3-bar:#8E63F0; --p3-tint:#3A2A6B;
+  --p4-bar:#E8789A; --p4-tint:#4F1E2B;
+  --p5-bar:#D19A0B; --p5-tint:#4A3D10;
+  --p6-bar:#EE8120; --p6-tint:#5C3A12;
+  --p7-bar:#2DB1E8; --p7-tint:#0F3A4F;
+  --p8-bar:#98A2B3; --p8-tint:#343B48;
+  --p9-bar:#3B82E0; --p9-tint:#1B3A6B;
+  --p10-bar:#2E9E68; --p10-tint:#1A4A33;
+  --p11-bar:#EF6A52; --p11-tint:#5A2219;
+}
+.cat-celebration{--cc:var(--b-celebration,var(--c-celebration))}
+.cat-gathering{--cc:var(--b-gathering,var(--c-gathering))}
+.cat-stay{--cc:var(--b-stay,var(--c-stay))}
+.cat-trip{--cc:var(--b-trip,var(--c-trip))}
+.cat-custom_1{--cc:var(--b-custom_1,var(--c-unclassified))}
+.cat-custom_2{--cc:var(--b-custom_2,var(--c-unclassified))}
+.cat-custom_3{--cc:var(--b-custom_3,var(--c-unclassified))}
+
+
+/* language switch, Catégories editor (SPEC §19.9) */
+.lang button{font-size:.75rem;padding:.2rem .55rem}
+.login .lang{width:max-content;margin:0 auto 1rem}
+.type-card{border:1px solid var(--line);border-radius:12px;padding:.7rem .9rem;margin:0 0 .8rem;display:grid;gap:.6rem}
+.type-card legend{display:flex;align-items:center;gap:.5rem;padding:0 .4rem;font-weight:700}
+.type-card .sw{width:1rem;height:1rem}
+.type-names{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:.5rem .8rem}
+.type-color select{max-width:22rem}
+.type-card input[aria-invalid="true"],.type-card select[aria-invalid="true"]{outline:2px solid var(--c-holiday)}
+.type-card .btn{justify-self:start}
+.type-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0}
+.badge.soft{background:var(--weekend);color:var(--muted);font-weight:600}
+ul.plain{margin:0 0 .8rem;padding-left:1.1rem}
+p.ok{color:var(--c-stay);font-weight:700;margin:.3rem 0;min-height:1em}
 
 /* print (SPEC §10) */
 .print-head,.print-foot{display:none}
@@ -280,6 +350,10 @@ body.kiosk.idle,body.kiosk.idle *{cursor:none!important}
     --today:#1B2130; --panel:#FFFFFF;
     --c-birthday:#E0457B; --c-celebration:#8B5CF6; --c-gathering:#E5533D; --c-stay:#2A9563;
     --c-trip:#2F7FE0; --c-holiday:#D93A3A; --c-unclassified:#8A93A3;
+    --p1-bar:#7C86D6; --p1-tint:#D8DCF6; --p2-bar:#5FA37A; --p2-tint:#BDE6B2; --p3-bar:#8B5CF6; --p3-tint:#E2D6FB;
+    --p4-bar:#E4678A; --p4-tint:#F9C6D1; --p5-bar:#C58B00; --p5-tint:#FFE6A3; --p6-bar:#E26E00; --p6-tint:#FFD2A6;
+    --p7-bar:#0FA0DB; --p7-tint:#BDE7F8; --p8-bar:#566070; --p8-tint:#D3D8E0; --p9-bar:#2F7FE0; --p9-tint:#C9DDFB;
+    --p10-bar:#2A9563; --p10-tint:#BFE5D0; --p11-bar:#E5533D; --p11-tint:#F8CBC3;
     --cs:var(--print-cs,30px)!important;
     color-scheme:light; padding:0;
   }

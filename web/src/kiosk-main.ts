@@ -1,11 +1,13 @@
 // Kiosk page (SPEC §9): a wall tablet showing the year, read-only, always fresh.
 import "./styles.css";
 import { ApiError, getConfig, getEvents, setLoginUrl, type ApiEvent, type Config } from "./api";
+import { applyTypeColors } from "./colors";
 import { byId, h, swatch } from "./dom";
+import { adoptLang, applyStatic, t } from "./i18n";
 import { localDay, fmtTime } from "./fmt";
 import { closePanel, openDay } from "./panel";
 import { fit, render } from "./render";
-import { hasUnclassified, LEGEND_CATS, state, toAppEvent, typeLabelPlural } from "./state";
+import { hasUnclassified, legendCats, state, toAppEvent, typeLabelPlural } from "./state";
 
 const PANEL_MS = 20_000;
 const CURSOR_MS = 5_000;
@@ -23,7 +25,7 @@ let panelTimer = 0;
 // ---------- painting ----------
 
 function buildLegend(): void {
-  const cats = hasUnclassified() ? [...LEGEND_CATS, "unclassified" as const] : LEGEND_CATS;
+  const cats = hasUnclassified() ? [...legendCats(), "unclassified"] : legendCats();
   const chips = cats.map((k) => {
     const c = h("span", "chip static");
     c.setAttribute("role", "listitem");
@@ -32,7 +34,7 @@ function buildLegend(): void {
   });
   const both = h("span", "chip static");
   both.setAttribute("role", "listitem");
-  both.append(swatch("both"), document.createTextNode("Les deux"));
+  both.append(swatch("both"), document.createTextNode(t("both.name")));
   byId("legend").replaceChildren(...chips, both);
 }
 
@@ -51,13 +53,15 @@ function setOffline(since: Date | null): void {
   offlineSince = since;
   const el = byId("offline");
   el.hidden = since === null;
-  el.textContent = since ? `Hors ligne depuis ${fmtTime(since, tz)}` : "";
+  el.textContent = since ? t("kiosk.offline", { time: fmtTime(since, tz) }) : "";
 }
 
 // ---------- data ----------
 
 function applyConfig(cfg: Config): void {
   state.config = cfg;
+  adoptLang(cfg.lang);
+  applyTypeColors(cfg.types);
   tz = cfg.timezone;
   state.year = +cfg.today.slice(0, 4);
 }
@@ -192,6 +196,7 @@ function pickView(cfg: Config): "week" | "month" {
 }
 
 async function boot(): Promise<void> {
+  applyStatic();
   setLoginUrl("/connexion?error=kiosk");
   initTaps();
   initCursor();

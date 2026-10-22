@@ -6,6 +6,8 @@ use std::str::FromStr;
 use chrono::{NaiveDate, NaiveTime};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::lang::Lang;
+
 /// The two Google calendars the app reads and writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,9 +42,13 @@ pub enum RenderKind {
     Bar,
 }
 
-/// Category of an event, derived only from the Google `colorId` (§4.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// Highest slot number of a custom type (`custom_1` … `custom_3`): Google offers 11 event colors
+/// and the 8 colored built-in types use 8 of them (§19.3).
+pub const MAX_CUSTOM: u8 = 3;
+
+/// Category of an event. The Google `colorId` → type mapping lives in the
+/// [`TypeCatalog`](crate::catalog::TypeCatalog) (§19.3); this enum is the stable identity of a type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EventType {
     SchoolHoliday,
     DaycareClosure,
@@ -53,9 +59,12 @@ pub enum EventType {
     Trip,
     Celebration,
     Unclassified,
+    /// User-defined type in slot `1..=MAX_CUSTOM` (a Famille bar).
+    Custom(u8),
 }
 
 impl EventType {
+    /// The built-in types (custom types come from the catalog).
     pub const ALL: [EventType; 9] = [
         EventType::SchoolHoliday,
         EventType::DaycareClosure,
@@ -68,7 +77,7 @@ impl EventType {
         EventType::Unclassified,
     ];
 
-    /// The six types users can create and edit, in the order of the dialog's select.
+    /// The six built-in types users can create and edit, in the order of the dialog's select.
     pub const WRITABLE: [EventType; 6] = [
         EventType::Birthday,
         EventType::Celebration,
@@ -77,6 +86,10 @@ impl EventType {
         EventType::Trip,
         EventType::DaycareClosure,
     ];
+
+    pub fn is_custom(self) -> bool {
+        matches!(self, EventType::Custom(_))
+    }
 
     /// Machine code (also the JSON value).
     pub fn code(self) -> &'static str {
@@ -90,30 +103,26 @@ impl EventType {
             EventType::Trip => "trip",
             EventType::Celebration => "celebration",
             EventType::Unclassified => "unclassified",
+            EventType::Custom(1) => "custom_1",
+            EventType::Custom(2) => "custom_2",
+            EventType::Custom(3) => "custom_3",
+            EventType::Custom(_) => "custom_invalid",
         }
     }
 
     pub fn from_code(code: &str) -> Option<Self> {
+        // Exactly one spelling per type: `custom_01` and `custom_+1` are not codes.
+        match code {
+            "custom_1" => return Some(EventType::Custom(1)),
+            "custom_2" => return Some(EventType::Custom(2)),
+            "custom_3" => return Some(EventType::Custom(3)),
+            _ => {}
+        }
         EventType::ALL.into_iter().find(|t| t.code() == code)
     }
 
-    /// Type for a Google `colorId`. Unknown or missing ids are `Unclassified`.
-    pub fn from_color_id(color_id: Option<&str>) -> Self {
-        match color_id {
-            Some("5") => EventType::SchoolHoliday,
-            Some("4") => EventType::DaycareClosure,
-            Some("2") => EventType::Birthday,
-            Some("8") => EventType::PublicHoliday,
-            Some("11") => EventType::FamilyGathering,
-            Some("10") => EventType::FamilyHome,
-            Some("9") => EventType::Trip,
-            Some("3") => EventType::Celebration,
-            _ => EventType::Unclassified,
-        }
-    }
-
-    /// Google `colorId` written for this type (`None` for `Unclassified`).
-    pub fn color_id(self) -> Option<&'static str> {
+    /// Default Google `colorId` of a built-in type (`None` for `Unclassified` and custom types).
+    pub fn default_color_id(self) -> Option<&'static str> {
         match self {
             EventType::SchoolHoliday => Some("5"),
             EventType::DaycareClosure => Some("4"),
@@ -123,7 +132,7 @@ impl EventType {
             EventType::FamilyHome => Some("10"),
             EventType::Trip => Some("9"),
             EventType::Celebration => Some("3"),
-            EventType::Unclassified => None,
+            EventType::Unclassified | EventType::Custom(_) => None,
         }
     }
 
@@ -137,44 +146,58 @@ impl EventType {
             EventType::FamilyGathering
             | EventType::FamilyHome
             | EventType::Trip
-            | EventType::Celebration => Some(CalendarKind::Famille),
+            | EventType::Celebration
+            | EventType::Custom(_) => Some(CalendarKind::Famille),
             EventType::Unclassified => None,
         }
     }
 
-    /// French singular label.
-    pub fn label(self) -> &'static str {
-        match self {
-            EventType::SchoolHoliday => "Vacances scolaires",
-            EventType::DaycareClosure => "Fermeture de la crèche ou du centre de loisirs",
-            EventType::Birthday => "Anniversaire",
-            EventType::PublicHoliday => "Jour férié",
-            EventType::FamilyGathering => "Réunion de famille",
-            EventType::FamilyHome => "Séjour en maison de famille",
-            EventType::Trip => "Voyage ou vacances",
-            EventType::Celebration => "Fête ou cérémonie",
-            EventType::Unclassified => "Non classé",
+    /// Default singular name of a built-in type (empty for custom types).
+    pub fn default_label(self, lang: Lang) -> &'static str {
+        let (fr, en) = match self {
+            EventType::SchoolHoliday => ("Vacances scolaires", "School holiday"),
+            EventType::DaycareClosure => (
+                "Fermeture de la crèche ou du centre de loisirs",
+                "Daycare or leisure-centre closure",
+            ),
+            EventType::Birthday => ("Anniversaire", "Birthday"),
+            EventType::PublicHoliday => ("Jour férié", "Public holiday"),
+            EventType::FamilyGathering => ("Réunion de famille", "Family gathering"),
+            EventType::FamilyHome => ("Séjour en maison de famille", "Stay at a family home"),
+            EventType::Trip => ("Voyage ou vacances", "Trip or vacation"),
+            EventType::Celebration => ("Fête ou cérémonie", "Party or ceremony"),
+            EventType::Unclassified => ("Non classé", "Unclassified"),
+            EventType::Custom(_) => ("", ""),
+        };
+        match lang {
+            Lang::Fr => fr,
+            Lang::En => en,
         }
     }
 
-    /// French plural label used in the legend.
-    pub fn label_plural(self) -> &'static str {
-        match self {
-            EventType::SchoolHoliday => "Vacances scolaires",
-            EventType::DaycareClosure => "Crèche / loisirs fermés",
-            EventType::Birthday => "Anniversaires",
-            EventType::PublicHoliday => "Jours fériés",
-            EventType::FamilyGathering => "Réunions de famille",
-            EventType::FamilyHome => "Maisons de famille",
-            EventType::Trip => "Voyages & vacances",
-            EventType::Celebration => "Fêtes & cérémonies",
-            EventType::Unclassified => "Non classés",
+    /// Default plural name (legend) of a built-in type (empty for custom types).
+    pub fn default_label_plural(self, lang: Lang) -> &'static str {
+        let (fr, en) = match self {
+            EventType::SchoolHoliday => ("Vacances scolaires", "School holidays"),
+            EventType::DaycareClosure => ("Crèche / loisirs fermés", "Daycare / leisure closed"),
+            EventType::Birthday => ("Anniversaires", "Birthdays"),
+            EventType::PublicHoliday => ("Jours fériés", "Public holidays"),
+            EventType::FamilyGathering => ("Réunions de famille", "Family gatherings"),
+            EventType::FamilyHome => ("Maisons de famille", "Family homes"),
+            EventType::Trip => ("Voyages & vacances", "Trips & vacations"),
+            EventType::Celebration => ("Fêtes & cérémonies", "Parties & ceremonies"),
+            EventType::Unclassified => ("Non classés", "Unclassified"),
+            EventType::Custom(_) => ("", ""),
+        };
+        match lang {
+            Lang::Fr => fr,
+            Lang::En => en,
         }
     }
 
     /// Users can create events of this type (and imported types cannot be edited).
     pub fn writable(self) -> bool {
-        EventType::WRITABLE.contains(&self)
+        self.is_custom() || EventType::WRITABLE.contains(&self)
     }
 
     pub fn render(self) -> RenderKind {
@@ -196,6 +219,7 @@ impl EventType {
                 | EventType::Trip
                 | EventType::Celebration
                 | EventType::Unclassified
+                | EventType::Custom(_)
         )
     }
 }
@@ -206,31 +230,17 @@ impl fmt::Display for EventType {
     }
 }
 
-/// `TypeInfo` of `GET /api/config` (§7).
-#[derive(Debug, Clone, Serialize)]
-pub struct TypeInfo {
-    pub code: &'static str,
-    pub label: &'static str,
-    pub label_plural: &'static str,
-    /// `None` for `unclassified`.
-    pub calendar: Option<CalendarKind>,
-    pub writable: bool,
-    pub render: RenderKind,
+impl Serialize for EventType {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.code())
+    }
 }
 
-impl TypeInfo {
-    pub fn all() -> Vec<TypeInfo> {
-        EventType::ALL
-            .into_iter()
-            .map(|t| TypeInfo {
-                code: t.code(),
-                label: t.label(),
-                label_plural: t.label_plural(),
-                calendar: t.home_calendar(),
-                writable: t.writable(),
-                render: t.render(),
-            })
-            .collect()
+impl<'de> Deserialize<'de> for EventType {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        EventType::from_code(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown event type {s:?}")))
     }
 }
 
@@ -410,17 +420,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn color_id_mapping_round_trips_for_all_typed_kinds() {
-        for t in EventType::ALL {
-            match t.color_id() {
-                Some(id) => assert_eq!(EventType::from_color_id(Some(id)), t),
-                None => assert_eq!(t, EventType::Unclassified),
-            }
-        }
-    }
-
-    #[test]
-    fn color_ids_match_the_spec_table() {
+    fn default_color_ids_match_the_spec_table() {
         let expected = [
             ("5", EventType::SchoolHoliday),
             ("4", EventType::DaycareClosure),
@@ -432,27 +432,17 @@ mod tests {
             ("3", EventType::Celebration),
         ];
         for (id, t) in expected {
-            assert_eq!(EventType::from_color_id(Some(id)), t, "colorId {id}");
+            assert_eq!(t.default_color_id(), Some(id), "{t}");
         }
+        assert_eq!(EventType::Unclassified.default_color_id(), None);
+        assert_eq!(EventType::Custom(1).default_color_id(), None);
     }
 
     #[test]
-    fn missing_or_unmapped_color_is_unclassified() {
-        assert_eq!(EventType::from_color_id(None), EventType::Unclassified);
-        for id in ["1", "6", "7", "12", "", "abc"] {
-            assert_eq!(
-                EventType::from_color_id(Some(id)),
-                EventType::Unclassified,
-                "{id}"
-            );
-        }
-    }
-
-    #[test]
-    fn each_color_id_is_used_by_one_type() {
+    fn each_default_color_id_is_used_by_one_type() {
         let mut seen = std::collections::HashSet::new();
         for t in EventType::ALL {
-            if let Some(id) = t.color_id() {
+            if let Some(id) = t.default_color_id() {
                 assert!(seen.insert(id), "duplicate colorId {id}");
             }
         }
@@ -463,12 +453,17 @@ mod tests {
         assert!(!EventType::SchoolHoliday.writable());
         assert!(!EventType::PublicHoliday.writable());
         assert!(!EventType::Unclassified.writable());
+        assert!(EventType::Custom(2).writable());
         assert_eq!(EventType::WRITABLE.len(), 6);
         assert_eq!(
             EventType::Birthday.home_calendar(),
             Some(CalendarKind::Reperes)
         );
         assert_eq!(EventType::Trip.home_calendar(), Some(CalendarKind::Famille));
+        assert_eq!(
+            EventType::Custom(1).home_calendar(),
+            Some(CalendarKind::Famille)
+        );
         assert_eq!(EventType::Unclassified.home_calendar(), None);
     }
 
@@ -477,7 +472,35 @@ mod tests {
         for t in EventType::ALL {
             assert_eq!(EventType::from_code(t.code()), Some(t));
         }
+        for slot in 1..=MAX_CUSTOM {
+            let t = EventType::Custom(slot);
+            assert_eq!(EventType::from_code(t.code()), Some(t));
+            let json = serde_json::to_string(&t).unwrap();
+            assert_eq!(serde_json::from_str::<EventType>(&json).unwrap(), t);
+        }
         assert_eq!(EventType::from_code("nope"), None);
+        assert_eq!(EventType::from_code("custom_0"), None);
+        assert_eq!(EventType::from_code("custom_4"), None);
+        assert_eq!(EventType::from_code("custom_"), None);
+        for spelling in [
+            "custom_01",
+            "custom_+1",
+            "custom_001",
+            "custom_1 ",
+            "Custom_1",
+        ] {
+            assert_eq!(EventType::from_code(spelling), None, "{spelling}");
+        }
+    }
+
+    #[test]
+    fn default_labels_exist_in_both_languages() {
+        for t in EventType::ALL {
+            for lang in [Lang::Fr, Lang::En] {
+                assert!(!t.default_label(lang).is_empty(), "{t} {lang:?}");
+                assert!(!t.default_label_plural(lang).is_empty(), "{t} {lang:?}");
+            }
+        }
     }
 
     #[test]

@@ -1,4 +1,5 @@
 // Date helpers on ISO "YYYY-MM-DD" strings (local calendar days, no time zones involved).
+import { locale, t } from "./i18n";
 
 export const pad = (n: number): string => String(n).padStart(2, "0");
 export const iso = (y: number, m: number, d: number): string => `${y}-${pad(m)}-${pad(d)}`;
@@ -19,14 +20,14 @@ export const span = (s: string, e: string): number => diff(s, e) + 1;
 export const dow = (s: string): number => (parse(s).getDay() + 6) % 7;
 
 export const fmtLong = (s: string): string =>
-  parse(s).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  parse(s).toLocaleDateString(locale(), { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 export const fmtShort = (s: string): string =>
-  parse(s).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+  parse(s).toLocaleDateString(locale(), { weekday: "short", day: "numeric", month: "short" });
 export const fmtRange = (s: string, e: string): string =>
-  s === e ? fmtLong(s) : `du ${fmtShort(s)} au ${fmtShort(e)} ${parse(e).getFullYear()}`;
+  s === e ? fmtLong(s) : t("range.multi", { a: fmtShort(s), b: fmtShort(e), year: parse(e).getFullYear() });
 /** "16 octobre 2026" (used by the print footer). */
 export const fmtDayMonthYear = (s: string): string =>
-  parse(s).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  parse(s).toLocaleDateString(locale(), { day: "numeric", month: "long", year: "numeric" });
 export const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
 
 /** Calls `fn` for every day of [s, e] clipped to the year `Y`. */

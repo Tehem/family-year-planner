@@ -1,4 +1,5 @@
 // Typed client for the JSON API of SPEC §7.
+import { t } from "./i18n";
 
 export interface TypeInfo {
   code: string;
@@ -7,9 +8,16 @@ export interface TypeInfo {
   calendar: "reperes" | "famille" | null;
   writable: boolean;
   render: "tint" | "bar";
+  /** Google colorId (SPEC §19.4); `null` for `unclassified`. */
+  color_id: string | null;
+  /** A category the family added (SPEC §19.3). */
+  custom: boolean;
 }
 
 export interface Config {
+  /** Language of this request and of `types` (SPEC §19.2). */
+  lang: string;
+  default_language: string;
   members: string[];
   types: TypeInfo[];
   timezone: string;
@@ -91,15 +99,15 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   try {
     res = await fetch(path, init);
   } catch {
-    throw new ApiError(0, "network", "Impossible de joindre le serveur. Réessayez dans un instant.");
+    throw new ApiError(0, "network", t("err.network"));
   }
   if (res.status === 401) {
     window.location.assign(loginUrl());
-    throw new ApiError(401, "unauthorized", "Session expirée.");
+    throw new ApiError(401, "unauthorized", t("err.session"));
   }
   if (!res.ok) {
     let code = "error";
-    let message = "Une erreur est survenue. Réessayez dans un instant.";
+    let message = t("err.generic");
     try {
       const j = (await res.json()) as { error?: { code?: string; message?: string } };
       if (j.error?.message) message = j.error.message;
@@ -172,3 +180,58 @@ export const revokeGrant = (id: string): Promise<void> =>
   call("DELETE", `/api/admin/oauth-grants/${encodeURIComponent(id)}`);
 export const getImports = (): Promise<ImportStatus> => call("GET", "/api/admin/import");
 export const startImport = (): Promise<{ running: boolean }> => call("POST", "/api/admin/import", {});
+
+// ---- Catégories (SPEC §19.7) ----
+export interface TypeNames {
+  singular: string;
+  plural: string;
+}
+export interface EditableType {
+  code: string;
+  custom?: boolean;
+  color_id: string | null;
+  labels: { fr: TypeNames; en: TypeNames };
+}
+export interface PaletteEntry {
+  color_id: string;
+  name_fr: string;
+  name_en: string;
+}
+export interface MigrationState {
+  status: string;
+  error: string | null;
+  patched: number | null;
+}
+export interface TypesEditor {
+  /** Identifies the catalog the editor was loaded with; sent back on save. */
+  revision: string;
+  palette: PaletteEntry[];
+  max_custom: number;
+  max_name: number;
+  free_colors: string[];
+  types: EditableType[];
+  migration: MigrationState | null;
+  skipped: { count: number; ids: string[] } | null;
+}
+export interface TypeChange {
+  code: string;
+  from_color_id: string | null;
+  to_color_id: string | null;
+  events: number;
+}
+export interface TypesResult {
+  changes: TypeChange[];
+  orphans: number;
+  applied: boolean;
+  /** Events the color pass could not recolor (they keep their old color). */
+  skipped?: number;
+}
+
+export const getTypes = (): Promise<TypesEditor> => call("GET", "/api/admin/types");
+export const putTypes = (types: EditableType[], dryRun: boolean, revision: string): Promise<TypesResult> =>
+  call("PUT", "/api/admin/types", {
+    types: types.map(({ code, color_id, labels }) => ({ code, color_id, labels })),
+    dry_run: dryRun,
+    revision,
+  });
+export const resumeTypes = (): Promise<{ resumed: boolean }> => call("POST", "/api/admin/types/resume", {});

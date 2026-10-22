@@ -360,3 +360,121 @@ alternatives considered.
   "Année en famille" (page titles, headings, consent page), as do the `annee` binary and `/opt/annee`.
   The MCP server name is `family-year-planner`.
 - **Alternatives:** keeping the French image name; `family-calendar` (too generic).
+
+## D30 — Type catalog stored in SQLite, edited in Réglages (V1.1)
+
+- **Context:** SPEC §19 makes type names, colors and extra types configurable.
+- **Choice:** tables `type_settings` (only types that differ from the defaults, plus every custom type) and
+  `type_migrations`; the effective catalog lives in memory (`TypeRegistry`, crate `gcal`) and is shared with the
+  calendar stores. An invalid stored catalog falls back to the defaults with an error log.
+- **Alternatives:** `[[types]]` in `config.toml` (no UI, restart needed); storing the catalog in Google Calendar
+  (no natural place for it).
+
+## D31 — Added types are slots `custom_1`…`custom_3`
+
+- **Context:** each Google `colorId` serves one type and Google has 11 colors; the 8 colored built-in types use 8.
+- **Choice:** `EventType::Custom(1..=3)`, code `custom_N`, always a Famille bar, writable, "busy". The slot is
+  independent of the color, so recoloring never changes a code. The limit of 3 follows from the colors, it is not
+  an extra rule. Deleting a custom type clears the `colorId` of its events (they become unclassified).
+- **Alternatives:** free-form slug codes (non-`Copy` type, much more churn, ugly collisions); letting a custom
+  type live in Repères or render as a tint (many edge cases: legend, print, busy days).
+
+## D32 — Language per browser, resolved by a request-scoped layer
+
+- **Context:** SPEC §19.2 wants a French default and per-person English; messages are produced deep in the
+  server (validation, store errors, the consent page, imported titles).
+- **Choice:** cookie `annee_lang` (set by the front-end switch or `?lang=`), else `app.default_language` (`fr`).
+  `Accept-Language` is ignored on purpose ("FR par défaut"). A middleware runs each request inside a `tokio`
+  task-local, so code asks `i18n::current()` without threading a parameter. rmcp runs every MCP call in its own
+  spawned task, where the task-local is gone: `mcp_auth` stores the language in the request extensions and
+  `call_tool` re-enters the scope (`i18n::scoped`). MCP agents send no cookie, so they get the instance default.
+- **Alternatives:** an `Accept-Language` negotiation (surprising for a family tablet); passing `Lang` through every
+  function (large churn); a process-wide default (breaks tests that run several configs).
+
+## D33 — Imported titles are translated at read time
+
+- **Context:** imported holidays are stored in Google Calendar with a French title and are upserted by
+  `fy_source_id`; the app must show English titles to English users.
+- **Choice:** a fixed table maps the French titles of public holidays and of the usual school holidays to English
+  when the request language is English. Unknown titles (new dataset descriptions) are shown as stored. SPEC §19.2
+  says "by key"; matching the stored title is equivalent because the importer normalizes titles.
+- **Alternatives:** storing both languages in the event (breaks idempotent upserts); a translation per `fy_source_id`.
+
+## D34 — Color migration: one pass, resumable, writes blocked meanwhile
+
+- **Context:** Google Calendar is the source of truth, so recoloring a type means rewriting its events; a
+  swap of two colors must not lose track of which event moved.
+- **Choice:** the whole target catalog is validated first (so swaps are legal), then a single pass over the series
+  masters of both calendars rewrites `colorId` by an `old → new` map, tagging each event with `fy_migration=<id>`.
+  The migration row is stored before the pass; a failed or interrupted pass keeps writes blocked, is retried 3
+  times, resumed at startup and through `POST /api/admin/types/resume`. The pass runs in a detached task, so a
+  client disconnect cannot drop it. A write gate in `TypeRegistry` makes user writes and import runs hold a shared
+  guard while the migration takes it exclusively: it starts only when writes in flight are done, and new ones are
+  refused (`409 migrating`; imports are recorded as skipped). The importer also compares the type of existing
+  events, so an event written with a stale color heals on the next import. The in-memory catalog switches only
+  when the pass completes.
+- **Alternatives:** blocking recoloring when events exist; recoloring one type at a time (no swaps); a cancel path.
+- **Also:** an event Google refuses for good (a 400, or a 403 with a known permanent reason: `forbidden`, `forbiddenForNonOrganizer`, `requiredAccessLevel`,
+  `notACalendarUser`) or that disappeared is skipped, so that one event the service account cannot modify never
+  freezes the family's calendar. Every other 403 (quota and rate limits, including `dailyLimitExceeded` and
+  `calendarUsageLimitsExceeded`) stays retryable: an allow-list of permanent reasons rather than a blacklist of
+  quota ones. The skipped ids are stored on the migration row and logged, the PUT response carries their count and
+  the Catégories section shows a notice for the last pass only (a later pass replaces it; the ids stay in the
+  log and in the older migration rows).
+- **Limit:** while a pass is suspended after repeated failures, reads use the old catalog, so already-recolored
+  events appear under another type until the migration is resumed. There is no rollback (see the open question
+  on the PR).
+
+## D35 — Palette: one CSS entry per Google color
+
+- **Context:** a type's color now comes from a Google `colorId` chosen by the user; the design (light, dark, print)
+  must stay identical to the prototype for the default catalog, and the CSP forbids inline styles.
+- **Choice:** `--p<colorId>-bar` / `--p<colorId>-tint` (light, dark, print) in `styles.css`; the front-end only
+  points each type at the entry of its color (`colors.ts`), so themes and the always-light print need no logic.
+  Ids 2, 3, 4, 5, 9, 10, 11 reproduce the prototype colors (visual diff unchanged); 1, 6, 7, 8 are new.
+  The "both closed" orange, the public-holiday rendering and the `unclassified` grey are fixed whatever the colors.
+- **Alternatives:** generating a stylesheet from JS (blocked by the CSP); per-type hex sent by the server.
+
+## D36 — MCP follows the catalog
+
+- **Context:** agents must be able to use added types and see renamed ones; SPEC §13.1 still asks for French titles.
+- **Choice:** `get_context` is the source of truth and returns
+  `label`, `labels {fr,en}`, `color_id`, `custom`; the `type` parameters of the tools are plain strings whose
+  description lists the current codes (an `enum` would go stale in an agent's cached `tools/list`, and this
+  stateless server cannot send `list_changed`). Tool descriptions and the "titles in French" instruction stay as
+  in SPEC §13.1; one sentence is appended about configurable types. Messages use the instance default language (D32).
+- **Alternatives:** per-token language; letting the instructions say titles may be in any language (rejected: the
+  shared calendar is written in French).
+
+## D37 — Demo mode
+
+- **Context:** the demo store holds types, not Google colors, but must behave like the real one in e2e tests.
+- **Choice:** a catalog change re-derives types from the target catalog; "Reset the demo" also restores the default
+  catalog, so e2e tests stay independent.
+- **Alternatives:** giving demo events a `colorId` (more code, no new behavior); leaving the catalog across resets
+  (tests would depend on each other).
+
+## D38 — Verification notes
+
+- **Context:** CLAUDE.md asks to verify uncertain facts against official documentation.
+- **Choice:** the 11 Google event colors and their names come from SPEC §4.2 and the Calendar API `colors`
+  resource; the documentation site was not reachable from the build sandbox (`getaddrinfo ENOTFOUND`), so the names
+  were not re-checked live. `PW_CHROMIUM` lets Playwright use a Chromium whose version differs from the installed one.
+- **Alternatives:** none worth the cost; a live check belongs to the human setup (`annee check-config`).
+
+## D39 — Slots of added types are never reused within one save
+
+- **Context:** the server identifies a type by its code; deleting `custom_1` and adding a new category in the same
+  save would send `custom_1` in both catalogs, which reads as a rename and re-types the old events.
+- **Choice:** the editor offers only slots absent from both the draft and the saved catalog; after a deletion, the
+  user saves first. A deleted type's events are cleared, never silently re-typed.
+- **Alternatives:** random identities for added types (breaks the stable `custom_N` codes agents rely on);
+  server-side detection (cannot tell a rename from a replacement).
+
+## D40 — A save carries the catalog revision it was edited from
+
+- **Context:** the editor `PUT`s the whole catalog, and two adults can have Réglages open at once; a stale tab
+  lacking a category added elsewhere would delete it (and clear its events' colors).
+- **Choice:** `GET /api/admin/types` returns a `revision` (a short hash of the catalog); a `PUT` with another
+  revision, dry run included, is refused with `409 stale_catalog` and the unsaved edits stay on screen.
+- **Alternatives:** last write wins (silent data loss); locking the editor per session (needs presence tracking).

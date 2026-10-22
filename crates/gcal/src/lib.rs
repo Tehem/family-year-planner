@@ -4,8 +4,12 @@
 pub mod demo;
 pub mod google;
 pub mod recurrence;
+pub mod registry;
 pub mod store;
 
 pub use demo::DemoStore;
 pub use google::{GoogleConfig, GoogleStore};
-pub use store::{CalendarStore, DeleteScope, ImportedEvent, StoreError, StoreResult};
+pub use registry::{MigrationAccess, TypeRegistry, WriteAccess};
+pub use store::{
+    CalendarStore, DeleteScope, ImportedEvent, RecolorReport, StoreError, StoreResult,
+};

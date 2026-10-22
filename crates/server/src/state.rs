@@ -3,7 +3,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use annee_gcal::{CalendarStore, DemoStore};
+use annee_gcal::{CalendarStore, DemoStore, TypeRegistry};
 use axum::extract::FromRef;
 use axum_extra::extract::cookie::Key;
 use chrono::{NaiveDate, Utc};
@@ -17,6 +17,7 @@ use crate::oauth::jwt::TokenKeys;
 use crate::ratelimit::Limits;
 use crate::storage::Db;
 use crate::tokens::Tokens;
+use crate::types_admin::{TypeAdmin, load_catalog};
 
 pub struct Inner {
     pub config: AppConfig,
@@ -34,6 +35,9 @@ pub struct Inner {
     /// Google Sign-In (production only).
     pub oidc: Option<Arc<GoogleOidc>>,
     pub limits: Arc<Limits>,
+    /// The live type catalog (§19).
+    pub types: Arc<TypeRegistry>,
+    pub type_admin: Arc<TypeAdmin>,
 }
 
 #[derive(Clone)]
@@ -76,15 +80,20 @@ impl AppState {
         allow_insecure_cimd: bool,
     ) -> anyhow::Result<Self> {
         let base_url = config.app.base_url.clone();
-        let demo = Arc::new(DemoStore::new(config.tz(), config.family.members.clone()));
         let db = Db::memory().await?;
+        let types = Arc::new(TypeRegistry::new(load_catalog(&db).await));
+        let demo = Arc::new(
+            DemoStore::new(config.tz(), config.family.members.clone()).with_registry(types.clone()),
+        );
         let imports = import_service(
             &config,
             demo.clone(),
             Arc::new(FixtureEducation),
             db.clone(),
             fake_today,
+            types.clone(),
         );
+        let type_admin = TypeAdmin::new(db.clone(), types.clone(), demo.clone());
         Ok(AppState::new(Inner {
             config,
             mode: Mode::Demo,
@@ -103,6 +112,8 @@ impl AppState {
             imports,
             oidc: None,
             limits: Limits::standard(),
+            types,
+            type_admin,
         }))
     }
 
@@ -124,12 +135,14 @@ pub fn import_service(
     education: Arc<dyn EducationSource>,
     db: Db,
     fake_today: Option<NaiveDate>,
+    types: Arc<TypeRegistry>,
 ) -> Arc<ImportService> {
     let tz = config.tz();
     let importer = Importer::new(store, education, config.imports.clone(), tz);
     ImportService::new(
         importer,
         db,
+        types,
         Arc::new(move || fake_today.unwrap_or_else(|| Utc::now().with_timezone(&tz).date_naive())),
     )
 }

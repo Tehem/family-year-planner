@@ -1,17 +1,9 @@
 // Shared application state and the category vocabulary of the prototype.
 import type { ApiEvent, Config, Me } from "./api";
 
-/** Prototype category names (CSS classes `cat-*`), keyed by API type code. */
-export type Cat =
-  | "birthday"
-  | "celebration"
-  | "gathering"
-  | "stay"
-  | "trip"
-  | "school"
-  | "daycare"
-  | "holiday"
-  | "unclassified";
+/** Category names (CSS classes `cat-*`): the prototype's names for the built-in types, the type
+ *  code itself (`custom_1`…) for the types the family added (SPEC §19.3). */
+export type Cat = string;
 export type View = "week" | "month";
 
 export const CODE_TO_CAT: Record<string, Cat> = {
@@ -25,27 +17,32 @@ export const CODE_TO_CAT: Record<string, Cat> = {
   public_holiday: "holiday",
   unclassified: "unclassified",
 };
-export const CAT_TO_CODE: Record<Cat, string> = Object.fromEntries(
+export const CAT_TO_CODE: Record<string, string> = Object.fromEntries(
   Object.entries(CODE_TO_CAT).map(([code, cat]) => [cat, code]),
-) as Record<Cat, string>;
+);
+export const catOf = (code: string): Cat => CODE_TO_CAT[code] ?? code;
+export const codeOf = (cat: Cat): string => CAT_TO_CODE[cat] ?? cat;
 
-/** Legend order of the prototype; `unclassified` is appended only when needed. */
-export const LEGEND_CATS: Cat[] = [
-  "birthday",
-  "celebration",
-  "gathering",
-  "stay",
-  "trip",
-  "school",
-  "daycare",
-  "holiday",
-];
+/** Legend order of the prototype (built-in types). */
+const BUILTIN_LEGEND: Cat[] = ["birthday", "celebration", "gathering", "stay", "trip", "school", "daycare", "holiday"];
+
+/** The categories of the legend: the prototype's order, with the family's own categories after the
+ *  built-in bars (before the tints). `unclassified` is appended by the callers when needed. */
+export function legendCats(): Cat[] {
+  const custom = (state.config?.types ?? []).filter((t) => t.custom).map((t) => t.code);
+  const at = BUILTIN_LEGEND.indexOf("school");
+  return [...BUILTIN_LEGEND.slice(0, at), ...custom, ...BUILTIN_LEGEND.slice(at)];
+}
 /** Categories drawn as cell tints instead of bars. */
 export const TINTS: Cat[] = ["school", "daycare", "birthday", "holiday"];
 /** Categories that ignore the person filter (SPEC §5.6). */
 export const ALWAYS_SHOWN: Cat[] = ["school", "holiday", "birthday"];
-/** Order of the category select in the event dialog (prototype's EDITABLE). */
+/** Order of the category select in the event dialog (prototype's EDITABLE); added types come last. */
 export const EDITABLE_CODES = ["birthday", "celebration", "family_gathering", "family_home", "trip", "daycare_closure"];
+export const editableRank = (code: string): number => {
+  const i = EDITABLE_CODES.indexOf(code);
+  return i < 0 ? EDITABLE_CODES.length + +code.replace(/\D/g, "") : i;
+};
 
 export interface AppEvent extends ApiEvent {
   cat: Cat;
@@ -94,11 +91,11 @@ export function typeLabel(code: string): string {
   return state.config?.types.find((t) => t.code === code)?.label ?? code;
 }
 export function typeLabelPlural(cat: Cat): string {
-  return state.config?.types.find((t) => t.code === CAT_TO_CODE[cat])?.label_plural ?? cat;
+  return state.config?.types.find((t) => t.code === codeOf(cat))?.label_plural ?? cat;
 }
 
 export function toAppEvent(e: ApiEvent): AppEvent {
-  return { ...e, cat: CODE_TO_CAT[e.type] ?? "unclassified" };
+  return { ...e, cat: catOf(e.type) };
 }
 
 /** Category and person filters (SPEC §5.6). An event without members concerns everyone. */

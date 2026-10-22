@@ -1,6 +1,7 @@
 // Day tooltip (mouse only).
 import { byId, h, swatch } from "./dom";
 import { cap, fmtShort } from "./dates";
+import { t } from "./i18n";
 import { state } from "./state";
 
 export function showTip(d: string, e: PointerEvent): void {
@@ -13,7 +14,7 @@ export function showTip(d: string, e: PointerEvent): void {
       row.append(swatch(it.cat), h("span", undefined, it.label));
       nodes.push(row);
     }
-  } else nodes.push(h("div", "empty-note", "Rien de prévu"));
+  } else nodes.push(h("div", "empty-note", t("tip.nothing")));
   tip.replaceChildren(...nodes);
   tip.classList.add("on");
   const r = tip.getBoundingClientRect();

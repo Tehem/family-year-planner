@@ -2,7 +2,7 @@
 
 use annee_domain::birthday::{age_at, recurrence_rule};
 use annee_domain::dates::{exclusive_from_inclusive, inclusive_from_exclusive, timed_span};
-use annee_domain::{CalendarKind, Event, EventId, EventType, NewEvent, Source};
+use annee_domain::{CalendarKind, Event, EventId, EventType, NewEvent, Source, TypeCatalog};
 use chrono::{DateTime, Datelike, NaiveDate};
 use chrono_tz::Tz;
 use serde_json::{Map, Value, json};
@@ -18,10 +18,13 @@ pub const KEY_SOURCE: &str = "fy_source";
 pub const KEY_SOURCE_ID: &str = "fy_source_id";
 pub const KEY_CREATED_BY: &str = "fy_created_by";
 pub const KEY_UPDATED_BY: &str = "fy_updated_by";
+/// Id of the color migration that last rewrote the event (§19.5).
+pub const KEY_MIGRATION: &str = "fy_migration";
 
 pub struct MapCtx<'a> {
     pub tz: Tz,
     pub members: &'a [String],
+    pub catalog: &'a TypeCatalog,
 }
 
 fn parse_date(s: &str) -> Option<NaiveDate> {
@@ -56,7 +59,7 @@ pub fn to_event(g: &GEvent, calendar: CalendarKind, ctx: &MapCtx) -> Option<Even
         return None;
     };
 
-    let kind = EventType::from_color_id(g.color_id.as_deref());
+    let kind = ctx.catalog.from_color_id(g.color_id.as_deref());
     let source = g.private(KEY_SOURCE).map(Source::parse).unwrap_or_default();
     let mut members = Vec::new();
     if let Some(csv) = g.private(KEY_MEMBERS) {
@@ -135,7 +138,7 @@ fn members_csv(members: &[String]) -> Option<String> {
 }
 
 /// Body of `events.insert` for a user-created event.
-pub fn insert_body(new: &NewEvent, writer: &str, tz: Tz) -> GEvent {
+pub fn insert_body(new: &NewEvent, writer: &str, tz: Tz, catalog: &TypeCatalog) -> GEvent {
     let (start, end, recurrence) = if new.kind == EventType::Birthday {
         let first = annee_domain::birthday::first_occurrence(new.start, new.birth_year)
             .unwrap_or(new.start);
@@ -159,7 +162,7 @@ pub fn insert_body(new: &NewEvent, writer: &str, tz: Tz) -> GEvent {
         summary: Some(new.title.clone()),
         description: new.notes.clone(),
         location: new.location.clone(),
-        color_id: new.kind.color_id().map(String::from),
+        color_id: catalog.color_id(new.kind).map(String::from),
         start: Some(GTime::all_day(start.to_string())),
         end: Some(GTime::all_day(exclusive_from_inclusive(end).to_string())),
         recurrence,
@@ -169,14 +172,14 @@ pub fn insert_body(new: &NewEvent, writer: &str, tz: Tz) -> GEvent {
 }
 
 /// Body of `events.insert` for an imported event.
-pub fn insert_imported_body(e: &crate::store::ImportedEvent) -> GEvent {
+pub fn insert_imported_body(e: &crate::store::ImportedEvent, catalog: &TypeCatalog) -> GEvent {
     let mut private = std::collections::BTreeMap::new();
     private.insert(KEY_SCHEMA.to_string(), SCHEMA.to_string());
     private.insert(KEY_SOURCE.to_string(), e.source.as_str().to_string());
     private.insert(KEY_SOURCE_ID.to_string(), e.source_id.clone());
     GEvent {
         summary: Some(e.title.clone()),
-        color_id: e.kind.color_id().map(String::from),
+        color_id: catalog.color_id(e.kind).map(String::from),
         start: Some(GTime::all_day(e.start.to_string())),
         end: Some(GTime::all_day(exclusive_from_inclusive(e.end).to_string())),
         extended_properties: Some(GExtended { private }),
@@ -185,11 +188,20 @@ pub fn insert_imported_body(e: &crate::store::ImportedEvent) -> GEvent {
 }
 
 /// Patch for an imported event whose title or dates changed.
-pub fn imported_patch(e: &crate::store::ImportedEvent) -> Value {
+pub fn imported_patch(e: &crate::store::ImportedEvent, catalog: &TypeCatalog) -> Value {
     json!({
         "summary": e.title,
+        "colorId": catalog.color_id(e.kind),
         "start": {"date": e.start.to_string()},
         "end": {"date": exclusive_from_inclusive(e.end).to_string()},
+    })
+}
+
+/// Body of the `events.patch` that rewrites the color of an event during a migration.
+pub fn recolor_patch(migration_id: &str, color: Option<&str>) -> Value {
+    json!({
+        "colorId": color,
+        "extendedProperties": {"private": {KEY_MIGRATION: migration_id}},
     })
 }
 
@@ -207,7 +219,7 @@ pub fn patch_body(
     new: &NewEvent,
     writer: &str,
     dates: Option<DatePatch>,
-    include_color: bool,
+    color: Option<Option<&str>>,
 ) -> Value {
     let mut body = Map::new();
     if new.title != current.title {
@@ -219,8 +231,8 @@ pub fn patch_body(
     if new.notes != current.notes {
         body.insert("description".into(), json!(new.notes));
     }
-    if include_color {
-        body.insert("colorId".into(), json!(new.kind.color_id()));
+    if let Some(color) = color {
+        body.insert("colorId".into(), json!(color));
     }
     if let Some(d) = dates {
         body.insert(
@@ -268,6 +280,7 @@ mod tests {
             &MapCtx {
                 tz: Paris,
                 members: &m,
+                catalog: &TypeCatalog::default(),
             },
         )
     }
@@ -345,6 +358,7 @@ mod tests {
             &MapCtx {
                 tz: Paris,
                 members: &m,
+                catalog: &TypeCatalog::default(),
             },
         )
         .unwrap();
@@ -374,7 +388,8 @@ mod tests {
             notes: None,
             birth_year: None,
         };
-        let v = serde_json::to_value(insert_body(&new, "Alex", Paris)).unwrap();
+        let v = serde_json::to_value(insert_body(&new, "Alex", Paris, &TypeCatalog::default()))
+            .unwrap();
         assert_eq!(v["colorId"], "9");
         assert_eq!(v["start"], json!({"date": "2026-05-14"}));
         assert_eq!(v["end"], json!({"date": "2026-05-18"}), "exclusive end");
@@ -402,7 +417,8 @@ mod tests {
             notes: None,
             birth_year: Some(2018),
         };
-        let v = serde_json::to_value(insert_body(&new, "Alex", Paris)).unwrap();
+        let v = serde_json::to_value(insert_body(&new, "Alex", Paris, &TypeCatalog::default()))
+            .unwrap();
         assert_eq!(v["colorId"], "2");
         assert_eq!(v["start"]["date"], "2018-03-12");
         assert_eq!(v["end"]["date"], "2018-03-13");
@@ -429,7 +445,8 @@ mod tests {
             notes: None,
             birth_year: Some(2020),
         };
-        let v = serde_json::to_value(insert_body(&new, "T", Paris)).unwrap();
+        let v =
+            serde_json::to_value(insert_body(&new, "T", Paris, &TypeCatalog::default())).unwrap();
         assert_eq!(
             v["recurrence"],
             json!(["RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-1"])

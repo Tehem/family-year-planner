@@ -187,7 +187,10 @@ pub async fn prod_like_state_with(
         .insert("alex@example.com".into(), "Alex".into());
     config.calendars.reperes_id = "reperes".into();
     config.calendars.famille_id = "famille".into();
-    let store = Arc::new(DemoStore::new(config.tz(), config.family.members.clone()));
+    let types = Arc::new(annee_gcal::TypeRegistry::default());
+    let store = Arc::new(
+        DemoStore::new(config.tz(), config.family.members.clone()).with_registry(types.clone()),
+    );
     let db = Db::memory().await.unwrap();
     let imports = import_service(
         &config,
@@ -195,7 +198,10 @@ pub async fn prod_like_state_with(
         Arc::new(FixtureEducation),
         db.clone(),
         None,
+        types.clone(),
     );
+    let type_admin =
+        annee_server::types_admin::TypeAdmin::new(db.clone(), types.clone(), store.clone());
     let oidc = Arc::new(GoogleOidc::new(
         reqwest::Client::new(),
         "client-id".into(),
@@ -220,6 +226,8 @@ pub async fn prod_like_state_with(
         imports,
         oidc: Some(oidc),
         limits: Limits::standard(),
+        types,
+        type_admin,
     })
 }
 

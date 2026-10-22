@@ -77,6 +77,17 @@
   print (single page A3/A4), Réglages (tokens, OAuth connections, kiosk link, imports), kiosk, consent.
 - Playwright: 88 tests passing. Fixed a CSP/redirect bug on the consent decision (D26).
 
+## V1.1 — languages and configurable types (SPEC §19) ✅
+
+- M11 `domain`/`gcal`: `Lang`, `TypeCatalog` (names, colors, custom types, color mapping), localized
+  validation, catalog-aware stores, `count_colors` / `recolor` (wiremock + demo tests).
+- M12 server: request-scoped language layer, `type_settings` / `type_migrations`, `TypeAdmin` (preview,
+  resumable migration), `/api/admin/types`, dynamic MCP tool schemas, localized errors/consent page/imported titles.
+- M13 front-end: `i18n.ts` (FR/EN), language switch, palette CSS + `colors.ts`, dynamic legend and dialog,
+  Catégories editor in Réglages. Playwright: 103 tests, visual diff still 0.000 %.
+- M14 docs: SPEC §19, DECISIONS D30–D38, SETUP, README.
+- Not verified here: a real color migration against Google Calendar (covered by wiremock tests only).
+
 ## Definition of Done
 
 All milestones M1–M10 are implemented. Not verifiable here: CI on a GitHub remote, and anything

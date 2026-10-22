@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use annee_domain::dates::ymd;
 use annee_domain::validation::validate_new;
-use annee_domain::{EventId, EventInput, EventType, NewEvent, ValidationContext};
+use annee_domain::{EventId, EventInput, EventType, NewEvent, TypeCatalog, ValidationContext};
 use annee_gcal::google::auth::{ServiceAccountAuth, ServiceAccountKey, StaticToken, TokenProvider};
 use annee_gcal::{
     CalendarStore, DeleteScope, GoogleConfig, GoogleStore, ImportedEvent, StoreError,
@@ -61,6 +61,7 @@ fn new_event(kind: &str, title: &str, start: &str, end: &str) -> NewEvent {
         &ValidationContext {
             members: &m,
             today: ymd(2026, 10, 16),
+            catalog: &TypeCatalog::default(),
         },
     )
     .unwrap()
@@ -751,4 +752,218 @@ fn generate_pem() -> (String, String) {
             .to_public_key_pem(LineEnding::LF)
             .unwrap(),
     )
+}
+
+#[tokio::test]
+async fn count_colors_counts_series_masters_once_across_all_years() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(events_path(REPERES)))
+        .and(query_param("singleEvents", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+            all_day("bd1", "Anniversaire", Some("2"), "2018-03-12", "2018-03-13"),
+            all_day("r1", "Toussaint", Some("5"), "2026-10-17", "2026-11-02"),
+            all_day("r2", "Noël", Some("5"), "2026-12-19", "2027-01-04"),
+            {"id": "gone", "status": "cancelled", "colorId": "5"}
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(events_path(FAMILLE)))
+        .and(query_param("singleEvents", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+            all_day("f1", "Ski", Some("9"), "2026-02-21", "2026-03-01"),
+            all_day("f2", "Sans couleur", None, "2026-05-01", "2026-05-02")
+        ]})))
+        .mount(&server)
+        .await;
+    let counts = store(&server).count_colors().await.unwrap();
+    let expected: std::collections::BTreeMap<String, usize> = [("2", 1), ("5", 2), ("9", 1)]
+        .map(|(k, v)| (k.to_string(), v))
+        .into();
+    assert_eq!(counts, expected);
+}
+
+#[tokio::test]
+async fn recolor_applies_a_swap_in_one_pass_and_skips_migrated_events() {
+    let server = MockServer::start().await;
+    let tagged = |id: &str, color: &str| {
+        let mut v = all_day(id, "x", Some(color), "2026-05-01", "2026-05-02");
+        v["extendedProperties"] = json!({"private": {"fy_migration": "m1"}});
+        v
+    };
+    Mock::given(method("GET"))
+        .and(path(events_path(FAMILLE)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+            all_day("a", "Ski", Some("9"), "2026-02-21", "2026-03-01"),
+            all_day("b", "Réunion", Some("11"), "2026-04-01", "2026-04-02"),
+            all_day("c", "Sport", Some("6"), "2026-04-03", "2026-04-04"),
+            all_day("d", "Inchangé", Some("3"), "2026-04-05", "2026-04-06"),
+            tagged("e", "11")
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(events_path(REPERES)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&server)
+        .await;
+    for (id, color) in [("a", json!("11")), ("b", json!("9")), ("c", Value::Null)] {
+        Mock::given(method("PATCH"))
+            .and(path(event_path(FAMILLE, id)))
+            .and(body_partial_json(json!({
+                "colorId": color,
+                "extendedProperties": {"private": {"fy_migration": "m1"}}
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(all_day(
+                id,
+                "x",
+                None,
+                "2026-01-01",
+                "2026-01-02",
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let mapping = [
+        ("9".to_string(), Some("11".to_string())),
+        ("11".to_string(), Some("9".to_string())),
+        ("6".to_string(), None),
+    ]
+    .into();
+    let n = store(&server)
+        .recolor("m1", &mapping, &TypeCatalog::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        (n.patched, n.skipped.len()),
+        (3, 0),
+        "d is not in the mapping, e already carries the migration id"
+    );
+}
+
+#[tokio::test]
+async fn a_listing_that_overlaps_an_invalidation_is_not_cached() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(events_path(REPERES)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(events_path(FAMILLE)))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"items": []}))
+                .set_delay(Duration::from_millis(300)),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let s = Arc::new(store(&server));
+    let first = tokio::spawn({
+        let s = s.clone();
+        async move { s.list_year(2026).await }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The catalog changes while the listing is in flight.
+    s.invalidate_cache();
+    first.await.unwrap().unwrap();
+    // The stale listing was served but not kept: the next call fetches again (both mocks expect 2).
+    s.list_year(2026).await.unwrap();
+}
+
+#[tokio::test]
+async fn recolor_skips_an_event_google_refuses_for_good_but_not_a_rate_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(events_path(FAMILLE)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+            all_day("ok", "A", Some("9"), "2026-02-21", "2026-03-01"),
+            all_day("locked", "B", Some("9"), "2026-04-01", "2026-04-02"),
+            all_day("gone", "C", Some("9"), "2026-04-03", "2026-04-04"),
+            all_day("last", "D", Some("9"), "2026-04-05", "2026-04-06")
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(events_path(REPERES)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&server)
+        .await;
+    let patched = || {
+        ResponseTemplate::new(200).set_body_json(all_day(
+            "x",
+            "x",
+            None,
+            "2026-01-01",
+            "2026-01-02",
+        ))
+    };
+    for id in ["ok", "last"] {
+        Mock::given(method("PATCH"))
+            .and(path(event_path(FAMILLE, id)))
+            .respond_with(patched())
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    // Not writable by the service account: skipped. Deleted meanwhile: skipped.
+    Mock::given(method("PATCH"))
+        .and(path(event_path(FAMILLE, "locked")))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(
+                json!({"error": {"errors": [{"reason": "forbiddenForNonOrganizer"}]}}),
+            ),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(event_path(FAMILLE, "gone")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let mapping = [("9".to_string(), Some("6".to_string()))].into();
+    let report = store(&server)
+        .recolor("m", &mapping, &TypeCatalog::default())
+        .await
+        .unwrap();
+    assert_eq!((report.patched, report.skipped.len()), (2, 2));
+    let mut ids = report.skipped.clone();
+    ids.sort();
+    assert_eq!(ids, ["gone", "locked"]);
+
+    // A 403 that is a quota is transient: the pass fails, to be retried.
+    for reason in [
+        "rateLimitExceeded",
+        "dailyLimitExceeded",
+        "calendarUsageLimitsExceeded",
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(events_path(FAMILLE)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+                all_day("a", "A", Some("9"), "2026-02-21", "2026-03-01")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(events_path(REPERES)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+            .mount(&server)
+            .await;
+        Mock::given(method("PATCH"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(json!({"error": {"errors": [{"reason": reason}]}})),
+            )
+            .mount(&server)
+            .await;
+        let err = store(&server)
+            .recolor("m", &mapping, &TypeCatalog::default())
+            .await;
+        assert!(matches!(err, Err(StoreError::Upstream(_))));
+    }
 }

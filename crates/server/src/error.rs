@@ -1,10 +1,12 @@
-//! API errors: `{ "error": { "code", "message" } }` with a French message.
+//! API errors: `{ "error": { "code", "message" } }` with a message in the request language.
 
 use annee_domain::ValidationError;
 use annee_gcal::StoreError;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+
+use crate::i18n::{current, tr};
 use serde_json::json;
 
 #[derive(Debug, Clone)]
@@ -27,7 +29,7 @@ impl ApiError {
         ApiError::new(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
-            "Connectez-vous pour continuer.",
+            tr("Connectez-vous pour continuer.", "Sign in to continue."),
         )
     }
 
@@ -36,11 +38,18 @@ impl ApiError {
     }
 
     pub fn read_only_session() -> Self {
-        ApiError::forbidden("Cette session est en lecture seule.")
+        ApiError::forbidden(tr(
+            "Cette session est en lecture seule.",
+            "This session is read-only.",
+        ))
     }
 
     pub fn not_found() -> Self {
-        ApiError::new(StatusCode::NOT_FOUND, "not_found", "Introuvable.")
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            tr("Introuvable.", "Not found."),
+        )
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
@@ -51,7 +60,7 @@ impl ApiError {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
-            "Une erreur est survenue.",
+            tr("Une erreur est survenue.", "Something went wrong."),
         )
     }
 }
@@ -73,23 +82,49 @@ impl From<ValidationError> for ApiError {
         } else {
             StatusCode::BAD_REQUEST
         };
-        ApiError::new(status, e.code(), e.to_string())
+        ApiError::new(status, e.code(), e.message(current()))
     }
 }
 
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> Self {
+        let message = store_message(&e);
         match &e {
-            StoreError::NotFound => {
-                ApiError::new(StatusCode::NOT_FOUND, "not_found", e.to_string())
-            }
-            StoreError::Conflict => ApiError::new(StatusCode::CONFLICT, "conflict", e.to_string()),
+            StoreError::NotFound => ApiError::new(StatusCode::NOT_FOUND, "not_found", message),
+            StoreError::Conflict => ApiError::new(StatusCode::CONFLICT, "conflict", message),
             StoreError::Upstream(detail) => {
                 tracing::error!(detail = %detail, "Google Calendar error");
-                ApiError::new(StatusCode::BAD_GATEWAY, "upstream_error", e.to_string())
+                ApiError::new(StatusCode::BAD_GATEWAY, "upstream_error", message)
             }
         }
     }
+}
+
+/// The message of a store failure in the request language.
+pub fn store_message(e: &StoreError) -> String {
+    match e {
+        StoreError::NotFound => tr("Événement introuvable.", "Event not found."),
+        StoreError::Conflict => tr(
+            "Cet événement a été modifié entre-temps. Rechargez la page.",
+            "This event was modified in the meantime. Reload the page.",
+        ),
+        StoreError::Upstream(_) => tr(
+            "Google Agenda ne répond pas. Réessayez dans un instant.",
+            "Google Calendar is not responding. Try again in a moment.",
+        ),
+    }
+}
+
+/// `409`: the catalog is being modified.
+pub fn migrating() -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "migrating",
+        tr(
+            "Les catégories sont en cours de modification. Réessayez dans un instant.",
+            "The categories are being modified. Try again in a moment.",
+        ),
+    )
 }
 
 /// Failure of an operation shared by the web API and MCP.
@@ -98,6 +133,8 @@ pub enum ServiceError {
     Validation(ValidationError),
     Store(StoreError),
     BadId,
+    /// The type colors are being migrated (§19.5).
+    Migrating,
 }
 
 impl From<ValidationError> for ServiceError {
@@ -117,9 +154,12 @@ impl From<ServiceError> for ApiError {
         match e {
             ServiceError::Validation(v) => v.into(),
             ServiceError::Store(s) => s.into(),
-            ServiceError::BadId => {
-                ApiError::new(StatusCode::NOT_FOUND, "not_found", "Événement introuvable.")
-            }
+            ServiceError::BadId => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                tr("Événement introuvable.", "Event not found."),
+            ),
+            ServiceError::Migrating => migrating(),
         }
     }
 }

@@ -265,6 +265,7 @@ async fn manual_events_are_never_touched() {
         &annee_domain::ValidationContext {
             members: &m,
             today: today(),
+            catalog: &annee_domain::TypeCatalog::default(),
         },
     )
     .unwrap();
@@ -397,7 +398,12 @@ async fn http_source_recovers_after_a_transient_failure() {
 
 async fn service(store: Arc<DemoStore>, education: Arc<dyn EducationSource>) -> Arc<ImportService> {
     let db = Db::memory().await.unwrap();
-    ImportService::new(importer(store, education), db, Arc::new(today))
+    ImportService::new(
+        importer(store, education),
+        db,
+        Arc::new(annee_gcal::TypeRegistry::default()),
+        Arc::new(today),
+    )
 }
 
 #[tokio::test]
@@ -574,4 +580,95 @@ async fn admin_import_endpoints() {
         .unwrap();
     assert_eq!(hiver["read_only"], true);
     assert_eq!(hiver["start"], "2027-02-20");
+}
+
+// ---- Type migrations (SPEC §19.5) ------------------------------------------------------------
+
+#[tokio::test]
+async fn events_imported_with_a_stale_color_are_healed_by_the_next_run() {
+    use annee_domain::{EventType, Source};
+    let store = store();
+    let imp = importer(store.clone(), Arc::new(FixtureEducation));
+    imp.run(today(), false).await.unwrap();
+    // A write that raced a color migration leaves a holiday typed as unclassified.
+    let victim = imported(&store).await[0].clone();
+    store
+        .update_imported(
+            &victim.id,
+            &annee_gcal::ImportedEvent {
+                kind: EventType::Unclassified,
+                title: victim.title.clone(),
+                start: victim.start,
+                end: victim.end,
+                source: Source::ImportPublicHolidays,
+                source_id: victim.source_id.clone().unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    let (counts, _) = imp.run(today(), false).await.unwrap();
+    assert_eq!((counts.updated, counts.created, counts.deleted), (1, 0, 0));
+    let healed = imported(&store)
+        .await
+        .into_iter()
+        .find(|e| e.id == victim.id)
+        .unwrap();
+    assert_eq!(healed.kind, victim.kind);
+    assert_eq!(imp.run(today(), false).await.unwrap().0.updated, 0);
+}
+
+#[tokio::test]
+async fn an_import_during_a_migration_is_recorded_as_skipped() {
+    let registry = Arc::new(annee_gcal::TypeRegistry::default());
+    let db = Db::memory().await.unwrap();
+    let svc = ImportService::new(
+        importer(store(), Arc::new(FixtureEducation)),
+        db,
+        registry.clone(),
+        Arc::new(today),
+    );
+    registry.set_migrating(true);
+    let run = svc.run("manual").await.unwrap();
+    assert_eq!(run.status, "failed");
+    assert_eq!(run.error.as_deref(), Some("skipped:migrating"));
+    assert_eq!(svc.recent_runs(10).await.unwrap().len(), 1);
+    registry.set_migrating(false);
+    assert_eq!(svc.run("manual").await.unwrap().status, "success");
+}
+
+#[tokio::test]
+async fn a_run_without_the_kind_check_does_not_read_recolored_events_as_stale() {
+    use annee_domain::{EventType, Source};
+    let store = store();
+    importer(store.clone(), Arc::new(FixtureEducation))
+        .run(today(), false)
+        .await
+        .unwrap();
+    let victim = imported(&store).await[0].clone();
+    store
+        .update_imported(
+            &victim.id,
+            &annee_gcal::ImportedEvent {
+                kind: EventType::Unclassified,
+                title: victim.title.clone(),
+                start: victim.start,
+                end: victim.end,
+                source: Source::ImportPublicHolidays,
+                source_id: victim.source_id.clone().unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+    // `annee import --dry-run` cannot know the stored colors: no spurious update.
+    let (counts, _) = importer(store.clone(), Arc::new(FixtureEducation))
+        .without_kind_check()
+        .run(today(), true)
+        .await
+        .unwrap();
+    assert_eq!(counts.updated, 0);
+    let (counts, _) = importer(store, Arc::new(FixtureEducation))
+        .run(today(), true)
+        .await
+        .unwrap();
+    assert_eq!(counts.updated, 1);
 }

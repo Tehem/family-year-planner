@@ -663,3 +663,132 @@ async fn kiosk_links_are_read_only_tokens_with_a_url() {
     assert_eq!(list[0]["scope"], "read");
     assert_eq!(list[0]["name"], "Kiosque – 16 octobre");
 }
+
+#[tokio::test]
+async fn custom_types_appear_in_the_context_and_the_tool_schemas_and_can_be_used() {
+    use annee_domain::{EventType, Labels, Names, TypeCatalog, TypeDef};
+    let (state, base) = setup().await;
+    let client = connect(&base, &pat(&state, "Claude", Scope::ReadWrite).await).await;
+    let before = client.list_all_tools().await.unwrap();
+    // The type parameters are free strings listing the codes in their description: a cached
+    // `tools/list` must not refuse a code added since.
+    let type_schema = |tools: &[rmcp::model::Tool], tool: &str| {
+        let t = tools.iter().find(|t| t.name == tool).unwrap();
+        t.input_schema["properties"]["type"].clone()
+    };
+    let before_schema = type_schema(&before, "create_event");
+    assert!(before_schema.get("enum").is_none());
+    assert!(!before_schema.to_string().contains("custom_1"));
+
+    let names = |s: &str| Names {
+        singular: s.into(),
+        plural: format!("{s}s"),
+    };
+    let mut defs = state.types.current().defs().to_vec();
+    defs.push(TypeDef {
+        kind: EventType::Custom(1),
+        color_id: Some("6".into()),
+        labels: Labels {
+            fr: names("Sport"),
+            en: names("Sport"),
+        },
+    });
+    state
+        .type_admin
+        .apply(TypeCatalog::new(defs).unwrap())
+        .await
+        .unwrap();
+
+    let ctx = structured(&call(&client, "get_context", json!({})).await);
+    let t = ctx["types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["code"] == "custom_1")
+        .unwrap()
+        .clone();
+    assert_eq!(t["label"], "Sport");
+    assert_eq!(t["labels"], json!({"fr": "Sport", "en": "Sport"}));
+    assert_eq!(
+        (t["custom"].clone(), t["color_id"].clone()),
+        (json!(true), json!("6"))
+    );
+    let trip = ctx["types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["code"] == "trip")
+        .unwrap()
+        .clone();
+    assert_eq!(trip["color_id"], "9");
+
+    let after = client.list_all_tools().await.unwrap();
+    for tool in ["create_event", "update_event"] {
+        let schema = type_schema(&after, tool);
+        assert!(schema.get("enum").is_none(), "{tool}");
+        assert!(schema.to_string().contains("custom_1 (Sport)"), "{tool}");
+    }
+    let ev = structured(
+        &call(
+            &client,
+            "create_event",
+            json!({"type": "custom_1", "title": "Judo", "start": "2026-11-04"}),
+        )
+        .await,
+    );
+    assert_eq!(ev["type"], "custom_1");
+    let found = structured(
+        &call(
+            &client,
+            "list_events",
+            json!({"from": "2026-11-01", "to": "2026-11-30", "types": ["custom_1"]}),
+        )
+        .await,
+    );
+    assert_eq!(found["events"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn mcp_uses_the_instance_default_language() {
+    // rmcp runs each tool call in its own task: the language must survive that hop.
+    let mut config = annee_server::config::AppConfig::default();
+    config.app.default_language = "en".into();
+    let state = AppState::demo(
+        config,
+        chrono::NaiveDate::from_ymd_opt(2026, 10, 16),
+        axum_extra::extract::cookie::Key::generate(),
+    )
+    .await
+    .unwrap();
+    let base = spawn_server(state.clone()).await;
+    let client = connect(&base, &pat(&state, "Claude", Scope::ReadWrite).await).await;
+
+    let ctx = structured(&call(&client, "get_context", json!({})).await);
+    let trip = ctx["types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["code"] == "trip")
+        .unwrap()
+        .clone();
+    assert_eq!(trip["label"], "Trip or vacation");
+
+    let r = call(
+        &client,
+        "create_event",
+        json!({"type": "trip", "title": " ", "start": "2026-07-01"}),
+    )
+    .await;
+    assert_eq!(r.is_error, Some(true));
+    assert_eq!(structured(&r)["message"], "Give the event a title.");
+
+    let found = structured(
+        &call(
+            &client,
+            "list_events",
+            json!({"from": "2026-07-14", "to": "2026-07-14", "types": ["public_holiday"]}),
+        )
+        .await,
+    );
+    assert_eq!(found["events"][0]["title"], "Bastille Day");
+}

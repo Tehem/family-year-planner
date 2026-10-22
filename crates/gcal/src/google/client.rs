@@ -14,6 +14,9 @@ use crate::store::StoreError;
 pub enum ApiError {
     NotFound,
     PreconditionFailed,
+    /// Google refused this very request (400, or a 403 with a permanent reason): retrying cannot
+    /// help, but the other events are unaffected.
+    Rejected(String),
     Upstream(String),
 }
 
@@ -22,7 +25,7 @@ impl From<ApiError> for StoreError {
         match e {
             ApiError::NotFound => StoreError::NotFound,
             ApiError::PreconditionFailed => StoreError::Conflict,
-            ApiError::Upstream(m) => StoreError::Upstream(m),
+            ApiError::Rejected(m) | ApiError::Upstream(m) => StoreError::Upstream(m),
         }
     }
 }
@@ -51,6 +54,8 @@ pub struct ListParams {
     pub time_min: Option<String>,
     pub time_max: Option<String>,
     pub private_property: Option<String>,
+    /// Return recurring series as one master event instead of expanding them.
+    pub masters: bool,
 }
 
 impl Client {
@@ -129,10 +134,14 @@ impl Client {
             StatusCode::PRECONDITION_FAILED => Err(ApiError::PreconditionFailed),
             _ => {
                 let text = resp.text().await.unwrap_or_default();
-                Err(ApiError::Upstream(format!(
-                    "Google answered {status}: {}",
-                    truncate(&text)
-                )))
+                let msg = format!("Google answered {status}: {}", truncate(&text));
+                if status == StatusCode::BAD_REQUEST
+                    || (status == StatusCode::FORBIDDEN && permanent_forbidden(&text))
+                {
+                    Err(ApiError::Rejected(msg))
+                } else {
+                    Err(ApiError::Upstream(msg))
+                }
             }
         }
     }
@@ -143,7 +152,7 @@ impl Client {
         let mut page: Option<String> = None;
         loop {
             let mut q: Vec<(&str, String)> = vec![
-                ("singleEvents", "true".into()),
+                ("singleEvents", (!p.masters).to_string()),
                 ("showDeleted", "false".into()),
                 ("maxResults", "2500".into()),
             ];
@@ -248,5 +257,59 @@ impl ErasedBody for GEvent {
 impl ErasedBody for Value {
     fn as_value(&self) -> Value {
         self.clone()
+    }
+}
+
+/// Reasons of a 403 that retrying cannot fix. Any other 403 (the `usageLimits` family:
+/// `rateLimitExceeded`, `userRateLimitExceeded`, `dailyLimitExceeded`, `quotaExceeded`,
+/// `calendarUsageLimitsExceeded`, ...) is a quota that comes back, so it stays retryable.
+const PERMANENT_FORBIDDEN: [&str; 4] = [
+    "forbidden",
+    "forbiddenForNonOrganizer",
+    "requiredAccessLevel",
+    "notACalendarUser",
+];
+
+fn permanent_forbidden(body: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let reasons: Vec<&str> = v["error"]["errors"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|e| e["reason"].as_str()).collect())
+        .unwrap_or_default();
+    !reasons.is_empty() && reasons.iter().all(|r| PERMANENT_FORBIDDEN.contains(r))
+}
+
+#[cfg(test)]
+mod forbidden_tests {
+    use super::permanent_forbidden;
+
+    fn body(reason: &str) -> String {
+        format!(r#"{{"error":{{"errors":[{{"reason":"{reason}"}}]}}}}"#)
+    }
+
+    #[test]
+    fn only_known_permanent_reasons_are_permanent() {
+        for r in [
+            "forbidden",
+            "forbiddenForNonOrganizer",
+            "requiredAccessLevel",
+        ] {
+            assert!(permanent_forbidden(&body(r)), "{r}");
+        }
+        for r in [
+            "rateLimitExceeded",
+            "userRateLimitExceeded",
+            "sharingRateLimitExceeded",
+            "quotaExceeded",
+            "dailyLimitExceeded",
+            "calendarUsageLimitsExceeded",
+            "somethingNew",
+        ] {
+            assert!(!permanent_forbidden(&body(r)), "{r}");
+        }
+        assert!(!permanent_forbidden("not json"));
+        assert!(!permanent_forbidden("{}"));
     }
 }

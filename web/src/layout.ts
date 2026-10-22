@@ -1,6 +1,7 @@
 // Geometry of the two views, in units of `--cs` (SPEC §8.1).
 import type { View } from "./state";
 import { addDays, diff, dow, iso } from "./dates";
+import { getLang } from "./i18n";
 
 export interface Pos {
   /** Bars are split on track changes (a month row, or a week column). */
@@ -27,10 +28,14 @@ export interface Layout {
   horiz: boolean;
 }
 
-export const MONTHS = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin", "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."];
-const WD = "LMMJVSD";
+const MONTHS_FR = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin", "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."];
+const MONTHS_EN = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
+export const months = (): string[] => (getLang() === "en" ? MONTHS_EN : MONTHS_FR);
+const weekdayLetters = (): string => (getLang() === "en" ? "MTWTFSS" : "LMMJVSD");
 
 export function layout(Y: number, view: View): Layout {
+  const MONTHS = months();
+  const WD = weekdayLetters();
   if (view === "month") {
     const L = 1.35;
     const T = 0.7;

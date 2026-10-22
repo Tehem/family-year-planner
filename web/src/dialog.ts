@@ -4,23 +4,24 @@ import { gotoYear, loadYear } from "./app";
 import { byId, h } from "./dom";
 import { closePanel } from "./panel";
 import { hideTip } from "./tooltip";
-import { EDITABLE_CODES, members, state, today, type AppEvent } from "./state";
+import { t } from "./i18n";
+import { editableRank, members, state, today, type AppEvent } from "./state";
 
 let editing: AppEvent | null = null;
 let saving = false;
 
 const dlg = () => byId<HTMLDialogElement>("dlg");
 const input = (id: string) => byId<HTMLInputElement>(id);
-const submitLabel = () => (editing ? "Enregistrer" : "Ajouter");
+const submitLabel = () => (editing ? t("dlg.save") : t("dlg.add"));
 
 function fillCategories(unclassified: boolean, selected: string): void {
   const sel = byId<HTMLSelectElement>("fCat");
   const types = (state.config?.types ?? [])
     .filter((t) => t.writable)
-    .sort((a, b) => EDITABLE_CODES.indexOf(a.code) - EDITABLE_CODES.indexOf(b.code));
+    .sort((a, b) => editableRank(a.code) - editableRank(b.code));
   const opts: HTMLOptionElement[] = [];
   if (unclassified) {
-    const ph = h("option", undefined, "Choisir une catégorie");
+    const ph = h("option", undefined, t("dlg.pickCat"));
     ph.value = "";
     ph.disabled = true;
     opts.push(ph);
@@ -37,7 +38,7 @@ function fillCategories(unclassified: boolean, selected: string): void {
 function fillMembers(selected: string[]): void {
   const all = selected.length === 0;
   byId("fMem").replaceChildren(
-    h("legend", undefined, "Qui est concerné ?"),
+    h("legend", undefined, t("f.who")),
     ...members().map((m) => {
       const label = h("label");
       const cb = h("input");
@@ -83,7 +84,7 @@ function open(title: string, ev: AppEvent | null, s: string, e: string): void {
 }
 
 export function openCreate(s: string, e: string): void {
-  open("Nouvel événement", null, s, e);
+  open(t("dlg.new"), null, s, e);
 }
 export function openAddToday(): void {
   const t = today();
@@ -91,7 +92,7 @@ export function openAddToday(): void {
   openCreate(s, s);
 }
 export function openEdit(ev: AppEvent): void {
-  open("Modifier l’événement", ev, ev.start, ev.end);
+  open(t("dlg.edit"), ev, ev.start, ev.end);
 }
 
 function readForm(): { error: string } | { payload: EventInput } {
@@ -102,11 +103,11 @@ function readForm(): { error: string } | { payload: EventInput } {
   const end = birthday ? start : input("fEnd").value;
   const boxes = [...byId("fMem").querySelectorAll<HTMLInputElement>("input")];
   const checked = boxes.filter((i) => i.checked).map((i) => i.value);
-  if (!title) return { error: "Donnez un titre à l’événement." };
-  if (!type) return { error: "Choisissez une catégorie." };
-  if (!start || !end) return { error: "Choisissez un premier et un dernier jour." };
-  if (end < start) return { error: "Le dernier jour ne peut pas être avant le premier." };
-  if (!checked.length) return { error: "Choisissez au moins une personne." };
+  if (!title) return { error: t("err.title") };
+  if (!type) return { error: t("err.cat") };
+  if (!start || !end) return { error: t("err.dates") };
+  if (end < start) return { error: t("err.order") };
+  if (!checked.length) return { error: t("err.person") };
   const payload: EventInput = {
     type,
     title,
@@ -123,7 +124,7 @@ function readForm(): { error: string } | { payload: EventInput } {
     const raw = input("fBirth").value.trim();
     if (raw) {
       const y = Number(raw);
-      if (!Number.isInteger(y) || y < 1900 || y > new Date().getFullYear()) return { error: "Année de naissance invalide." };
+      if (!Number.isInteger(y) || y < 1900 || y > new Date().getFullYear()) return { error: t("err.birth") };
       payload.birth_year = y;
     } else if (editing) payload.birth_year = null;
   }
@@ -142,12 +143,12 @@ async function submit(): Promise<void> {
   saving = true;
   const btn = byId<HTMLButtonElement>("submit");
   btn.disabled = true;
-  btn.textContent = "Enregistrement…";
+  btn.textContent = t("dlg.saving");
   try {
     if (editing) await updateEvent(editing.id, r.payload);
     else await createEvent(r.payload);
   } catch (e) {
-    err.textContent = e instanceof ApiError ? e.message : "Une erreur est survenue. Réessayez dans un instant.";
+    err.textContent = e instanceof ApiError ? e.message : t("err.generic");
     saving = false;
     btn.disabled = false;
     btn.textContent = submitLabel();

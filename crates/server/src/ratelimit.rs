@@ -90,7 +90,10 @@ pub fn too_many() -> Response {
     let mut res = ApiError::new(
         StatusCode::TOO_MANY_REQUESTS,
         "rate_limited",
-        "Trop de requêtes. Réessayez dans un instant.",
+        crate::i18n::tr(
+            "Trop de requêtes. Réessayez dans un instant.",
+            "Too many requests. Try again in a moment.",
+        ),
     )
     .into_response();
     res.headers_mut()

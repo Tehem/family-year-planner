@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use annee_gcal::{CalendarStore, DemoStore};
+use annee_gcal::{CalendarStore, DemoStore, TypeRegistry};
 use anyhow::anyhow;
 use chrono::Utc;
 
@@ -12,6 +12,7 @@ use crate::imports::education::{EducationSource, FixtureEducation, HttpEducation
 use crate::imports::{ImportService, Importer};
 use crate::state::import_service;
 use crate::storage::Db;
+use crate::types_admin::{has_unfinished_migration, load_catalog};
 
 /// `annee import [--dry-run]`.
 pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
@@ -19,13 +20,31 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
     let config = load_config(&env)?;
     env.require_prod_secrets(&["GOOGLE_SERVICE_ACCOUNT_FILE"])
         .map_err(|e| anyhow!(e))?;
+    // A dry run has no side effect: it does not open (and so does not create or migrate) the
+    // database, and plans with the default type colors.
+    let db = if dry_run {
+        None
+    } else {
+        Some(match env.mode {
+            Mode::Demo => Db::memory().await?,
+            Mode::Prod => Db::connect(&env.database_url).await?,
+        })
+    };
+    // Imported events take the colors of the configured type catalog (§19).
+    let types = Arc::new(match &db {
+        Some(db) => TypeRegistry::new(load_catalog(db).await),
+        None => TypeRegistry::default(),
+    });
     let (store, education): (Arc<dyn CalendarStore>, Arc<dyn EducationSource>) = match env.mode {
         Mode::Demo => (
-            Arc::new(DemoStore::new(config.tz(), config.family.members.clone())),
+            Arc::new(
+                DemoStore::new(config.tz(), config.family.members.clone())
+                    .with_registry(types.clone()),
+            ),
             Arc::new(FixtureEducation),
         ),
         Mode::Prod => (
-            Arc::new(google_store(&env, &config)?),
+            Arc::new(google_store(&env, &config, types.clone())?),
             Arc::new(HttpEducation::new(http_client()?)),
         ),
     };
@@ -34,8 +53,10 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
         .fake_today
         .unwrap_or_else(|| Utc::now().with_timezone(&tz).date_naive());
 
-    if dry_run {
-        let importer = Importer::new(store, education, config.imports.clone(), tz);
+    let Some(db) = db else {
+        // The dry run knows no stored colors: it must not read a recolored calendar as stale.
+        let importer =
+            Importer::new(store, education, config.imports.clone(), tz).without_kind_check();
         let (counts, lines) = importer.run(today, true).await.map_err(|e| anyhow!(e))?;
         for l in lines {
             println!("{l}");
@@ -45,13 +66,19 @@ pub async fn import(dry_run: bool, force_demo: bool) -> anyhow::Result<()> {
             counts.created, counts.updated, counts.deleted, counts.unchanged
         );
         return Ok(());
+    };
+    // The server may be rewriting colors (its in-memory flag is not visible from this process).
+    if has_unfinished_migration(&db)
+        .await
+        .map_err(|e| anyhow!("cannot read the category migrations: {e}"))?
+    {
+        return Err(anyhow!(
+            "a category color change is unfinished: resume it in Réglages first"
+        ));
     }
 
-    let db = match env.mode {
-        Mode::Demo => Db::memory().await?,
-        Mode::Prod => Db::connect(&env.database_url).await?,
-    };
-    let service: Arc<ImportService> = import_service(&config, store, education, db, env.fake_today);
+    let service: Arc<ImportService> =
+        import_service(&config, store, education, db, env.fake_today, types);
     let run = service
         .run("cli")
         .await
@@ -121,7 +148,7 @@ pub async fn check_config() -> anyhow::Result<()> {
         ));
     }
 
-    let store = match google_store(&env, &config) {
+    let store = match google_store(&env, &config, Arc::new(TypeRegistry::default())) {
         Ok(s) => {
             checks.report(true, "service account key", String::new());
             s
