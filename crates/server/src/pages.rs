@@ -77,6 +77,21 @@ fn no_store(mut res: Response) -> Response {
     res
 }
 
+/// Let the origins listed in `kiosk.frame_ancestors` (e.g. Home Assistant) embed this page.
+fn allow_framing(s: &AppState, mut res: Response) -> Response {
+    let ancestors = &s.config.kiosk.frame_ancestors;
+    if !ancestors.is_empty() {
+        let csp = crate::security::CSP.replace(
+            "frame-ancestors 'none'",
+            &format!("frame-ancestors {}", ancestors.join(" ")),
+        );
+        if let Ok(v) = csp.parse() {
+            res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, v);
+        }
+    }
+    res
+}
+
 async fn index(State(s): State<AppState>, headers: HeaderMap) -> Response {
     // The main screen needs a web session (a kiosk session is for /kiosk only).
     match principal_from_headers(&s, &headers).await {
@@ -125,7 +140,7 @@ async fn kiosk(
         };
     }
     match principal_from_headers(&s, &headers).await {
-        Some(_) => no_store(web::serve("kiosk.html")),
+        Some(_) => allow_framing(&s, no_store(web::serve("kiosk.html"))),
         None => login_redirect("/kiosk"),
     }
 }

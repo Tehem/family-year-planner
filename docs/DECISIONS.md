@@ -478,3 +478,12 @@ alternatives considered.
 - **Choice:** `GET /api/admin/types` returns a `revision` (a short hash of the catalog); a `PUT` with another
   revision, dry run included, is refused with `409 stale_catalog` and the unsaved edits stay on screen.
 - **Alternatives:** last write wins (silent data loss); locking the editor per session (needs presence tracking).
+
+## Kiosk iframe embedding and mobile header menu
+
+- **Context:** the kiosk must be embeddable in Home Assistant; the mobile header took too much space.
+- **Choice:** opt-in `kiosk.frame_ancestors` (list of origins) relaxes `frame-ancestors` on `/kiosk`
+  only, and makes the kiosk cookie `SameSite=None; Secure` (HTTPS only). On screens <= 760px the
+  legend, member filter and actions sit behind a "Filtres et menu" toggle.
+- **Alternatives:** wildcard framing (rejected: clickjacking surface on the editable app); token in
+  the iframe URL instead of a cookie (rejected: token would leak into every request URL).

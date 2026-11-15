@@ -851,7 +851,9 @@ The server refuses to start in prod if a required secret is missing, and prints 
   style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none';
   base-uri 'none'; form-action 'self'` (the OAuth consent form posts to self, then the server
   redirects), `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`.
-  HSTS is set by Caddy.
+  HSTS is set by Caddy. Exception: `/kiosk` uses `frame-ancestors` from `kiosk.frame_ancestors`
+  (default `'none'`) so it can be embedded in an iframe (Home Assistant); the kiosk cookie is then
+  `SameSite=None; Secure`.
 - CSRF: `SameSite=Lax` cookies + `X-Requested-With: annee` on mutating API calls + `Origin` check.
 - Never log tokens, codes, cookies or Google credentials. Log emails only at `debug`.
 - Rate limits: `/auth/*` 30/min/IP, `/oauth/register` 10/h/IP, `/oauth/token` 60/min/IP,

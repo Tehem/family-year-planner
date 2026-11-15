@@ -50,6 +50,11 @@ function init(): void {
     closePanel();
     void gotoYear(state.year + 1);
   });
+  const menuBtn = byId("menuBtn");
+  menuBtn.addEventListener("click", () => {
+    const open = byId("tools").parentElement!.classList.toggle("open");
+    menuBtn.setAttribute("aria-expanded", String(open));
+  });
   byId("addBtn").addEventListener("click", openAddToday);
   byId("reset").addEventListener("click", async () => {
     try {
