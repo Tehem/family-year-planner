@@ -98,11 +98,16 @@ test.describe("views, navigation, filters", () => {
     await expect(tip).toContainText("Rien de prévu");
   });
 
-  test("portrait hint on narrow screens", async ({ page }) => {
+  test("a phone in portrait must rotate to landscape", async ({ page }) => {
     await page.setViewportSize({ width: 400, height: 800 });
-    await openApp(page);
+    await page.goto("/"); // openApp waits for a bar, which is hidden in portrait
     await expect(page.locator(".hint")).toBeVisible();
-    await expect(page.locator(".hint")).toHaveText("Tournez votre téléphone pour voir l’année entière.");
+    await expect(page.locator(".hint")).toHaveText("Tournez votre téléphone en mode paysage pour afficher l’année.");
+    await expect(page.locator("#canvas")).toBeHidden();
+    await page.setViewportSize({ width: 800, height: 400 });
+    await expect(page.locator(".hint")).toBeHidden();
+    await expect(page.locator("#canvas")).toBeVisible();
+    await expect(bar(page, "Semaine de ski aux Arcs")).toBeVisible();
   });
 
   test("reduced motion removes the panel transition", async ({ page }) => {

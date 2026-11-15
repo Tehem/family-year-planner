@@ -487,3 +487,9 @@ alternatives considered.
   <= 760px the legend, member filter and actions sit behind a "Filtres et menu" toggle.
 - **Alternatives:** opt-in `kiosk.frame_ancestors` allowlist (dropped on the owner's request, too much
   configuration); token in the iframe URL instead of a cookie (rejected: leaks into request URLs).
+
+## Landscape required on phones
+
+- **Context:** in portrait the year board needs ~700px and is shown zoomed in with horizontal scroll; shrinking the cells to fit (8px) made it unreadable.
+- **Choice:** a phone in portrait (<= 760px wide) shows a "rotate your phone" screen instead of the board (app and kiosk). CSS only; the header (year, view, menu) stays reachable. Real orientation lock is not possible on the web outside fullscreen/PWA.
+- **Alternatives:** smaller minimum cell size (illegible), pinch-zoom (more work), `screen.orientation.lock` (unsupported in a normal tab).
