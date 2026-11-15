@@ -120,7 +120,13 @@ h1{margin:0;font-size:1.35rem;font-weight:800;letter-spacing:-.015em}
 .cat-stay{--cc:var(--c-stay)} .cat-trip{--cc:var(--c-trip)} .cat-school{--cc:var(--school)} .cat-daycare{--cc:var(--daycare)}
 .cat-holiday{--cc:var(--c-holiday)} .cat-both{--cc:var(--both)}
 .hint{display:none;text-align:center;color:var(--muted);font-size:.85rem;margin:0 0 .4rem}
-@media (orientation:portrait) and (max-width:760px){.hint{display:block}}
+/* A phone in portrait: the board is replaced by a "rotate your phone" screen (landscape is required). */
+@media screen and (orientation:portrait) and (max-width:760px){
+  .board:has(>.hint.rotate){display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .board>.hint.rotate{display:flex;flex-direction:column;align-items:center;gap:.8rem;margin:0;padding:1.5rem;font-size:1.05rem;font-weight:600;color:var(--ink)}
+  .board>.hint.rotate::before{content:"\21BB";font-size:3rem;line-height:1;display:block;transform:rotate(90deg);color:var(--muted)}
+  .board>.hint.rotate~.canvas{display:none}
+}
 
 /* tooltip */
 .tip{position:fixed;z-index:30;pointer-events:none;background:var(--panel);border-radius:10px;box-shadow:var(--shadow);
