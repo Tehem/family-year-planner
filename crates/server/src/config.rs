@@ -146,9 +146,6 @@ pub struct KioskSection {
     pub refresh_minutes: u32,
     #[serde(default = "default_view")]
     pub default_view: String,
-    /// Origins allowed to embed `/kiosk` in an `<iframe>` (e.g. Home Assistant). Empty = no framing.
-    #[serde(default)]
-    pub frame_ancestors: Vec<String>,
 }
 
 impl Default for KioskSection {
@@ -156,7 +153,6 @@ impl Default for KioskSection {
         KioskSection {
             refresh_minutes: default_refresh(),
             default_view: default_view(),
-            frame_ancestors: Vec::new(),
         }
     }
 }
@@ -286,16 +282,6 @@ impl AppConfig {
         }
         if !["week", "month"].contains(&self.kiosk.default_view.as_str()) {
             problems.push("kiosk.default_view must be \"week\" or \"month\"".into());
-        }
-        for a in &self.kiosk.frame_ancestors {
-            let ok = !a.is_empty()
-                && !a.chars().any(|c| c.is_whitespace() || ";,'\"".contains(c))
-                && (a.starts_with("http://") || a.starts_with("https://"));
-            if !ok {
-                problems.push(format!(
-                    "kiosk.frame_ancestors: {a:?} must be an origin like \"https://ha.example.com\" or \"http://homeassistant.local:8123\""
-                ));
-            }
         }
         if self.kiosk.refresh_minutes == 0 {
             problems.push("kiosk.refresh_minutes must be at least 1".into());

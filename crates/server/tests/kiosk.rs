@@ -126,39 +126,16 @@ async fn a_web_session_can_open_the_kiosk_page() {
 }
 
 #[tokio::test]
-async fn kiosk_page_is_frameable_only_for_configured_origins() {
-    // Default: the global policy applies (no framing).
+async fn only_the_kiosk_page_is_frameable() {
     let (mut app, _id, clear) = kiosk_app().await;
     app.get(&format!("/kiosk?token={clear}")).await;
-    let r = app.get("/kiosk").await;
-    assert!(
-        r.header("content-security-policy")
-            .unwrap()
-            .contains("frame-ancestors 'none'")
-    );
-
-    // Configured: /kiosk (only) allows the Home Assistant origin.
-    let mut config = annee_server::config::AppConfig::default();
-    config.kiosk.frame_ancestors = vec!["https://ha.example.com".into()];
-    let state = annee_server::state::AppState::demo(
-        config,
-        chrono::NaiveDate::from_ymd_opt(2026, 10, 16),
-        axum_extra::extract::cookie::Key::generate(),
-    )
-    .await
-    .unwrap();
-    let mut app = TestApp::with_state(state);
-    app.login().await;
     let csp = app
         .get("/kiosk")
         .await
         .header("content-security-policy")
         .unwrap()
         .to_string();
-    assert!(
-        csp.contains("frame-ancestors https://ha.example.com;"),
-        "{csp}"
-    );
+    assert!(csp.contains("frame-ancestors *;"), "{csp}");
     let r = app.get("/healthz").await;
     assert!(
         r.header("content-security-policy")

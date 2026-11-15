@@ -482,8 +482,8 @@ alternatives considered.
 ## Kiosk iframe embedding and mobile header menu
 
 - **Context:** the kiosk must be embeddable in Home Assistant; the mobile header took too much space.
-- **Choice:** opt-in `kiosk.frame_ancestors` (list of origins) relaxes `frame-ancestors` on `/kiosk`
-  only, and makes the kiosk cookie `SameSite=None; Secure` (HTTPS only). On screens <= 760px the
-  legend, member filter and actions sit behind a "Filtres et menu" toggle.
-- **Alternatives:** wildcard framing (rejected: clickjacking surface on the editable app); token in
-  the iframe URL instead of a cookie (rejected: token would leak into every request URL).
+- **Choice:** `/kiosk` (only) is served with `frame-ancestors *` and, over HTTPS, a `SameSite=None; Secure`
+  kiosk cookie. Kiosk links are admin-issued and revocable, so no origin allowlist. On screens
+  <= 760px the legend, member filter and actions sit behind a "Filtres et menu" toggle.
+- **Alternatives:** opt-in `kiosk.frame_ancestors` allowlist (dropped on the owner's request, too much
+  configuration); token in the iframe URL instead of a cookie (rejected: leaks into request URLs).

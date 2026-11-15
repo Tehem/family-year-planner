@@ -11,11 +11,11 @@ const KIOSK_DAYS: i64 = 400;
 
 /// The cookie that binds a browser to a kiosk token id (revoking the token ends the session).
 ///
-/// When the kiosk may be embedded in another site (`kiosk.frame_ancestors`), the cookie must be
-/// `SameSite=None; Secure` or browsers drop it in the cross-site iframe.
+/// The kiosk may be embedded in any site (e.g. Home Assistant), so over HTTPS the cookie is
+/// `SameSite=None; Secure`; otherwise browsers drop it in a cross-site iframe.
 pub fn kiosk_cookie(state: &AppState, token_id: &str) -> Cookie<'static> {
     let mut c = build_cookie(state, KIOSK_COOKIE, token_id.to_string(), KIOSK_DAYS);
-    if !state.config.kiosk.frame_ancestors.is_empty() && state.config.secure_cookies() {
+    if state.config.secure_cookies() {
         c.set_same_site(SameSite::None);
     }
     c

@@ -77,17 +77,11 @@ fn no_store(mut res: Response) -> Response {
     res
 }
 
-/// Let the origins listed in `kiosk.frame_ancestors` (e.g. Home Assistant) embed this page.
-fn allow_framing(s: &AppState, mut res: Response) -> Response {
-    let ancestors = &s.config.kiosk.frame_ancestors;
-    if !ancestors.is_empty() {
-        let csp = crate::security::CSP.replace(
-            "frame-ancestors 'none'",
-            &format!("frame-ancestors {}", ancestors.join(" ")),
-        );
-        if let Ok(v) = csp.parse() {
-            res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, v);
-        }
+/// `/kiosk` may be embedded anywhere (e.g. Home Assistant): a kiosk link is admin-issued and revocable.
+fn allow_framing(mut res: Response) -> Response {
+    let csp = crate::security::CSP.replace("frame-ancestors 'none'", "frame-ancestors *");
+    if let Ok(v) = csp.parse() {
+        res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, v);
     }
     res
 }
@@ -140,7 +134,7 @@ async fn kiosk(
         };
     }
     match principal_from_headers(&s, &headers).await {
-        Some(_) => allow_framing(&s, no_store(web::serve("kiosk.html"))),
+        Some(_) => allow_framing(no_store(web::serve("kiosk.html"))),
         None => login_redirect("/kiosk"),
     }
 }

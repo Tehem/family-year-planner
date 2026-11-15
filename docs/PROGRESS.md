@@ -95,5 +95,5 @@ needing real Google credentials (see `docs/SETUP.md`).
 
 ## Follow-up: kiosk iframe + mobile header
 
-- `kiosk.frame_ancestors` config (opt-in) lets Home Assistant embed `/kiosk`; documented in SETUP.md.
+- `/kiosk` can be embedded in any site (Home Assistant iframe); documented in SETUP.md.
 - Mobile (<= 760px): legend, member filter and actions collapse behind a "Filtres et menu" toggle.

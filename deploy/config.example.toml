@@ -29,5 +29,3 @@ public_holiday_years_ahead = 2      # import current year + N following
 [kiosk]
 refresh_minutes = 5
 default_view = "week"               # "week" or "month"
-# Origins allowed to embed /kiosk in an <iframe> (e.g. Home Assistant). Empty = framing forbidden.
-# frame_ancestors = ["https://ha.example.com", "http://homeassistant.local:8123"]
