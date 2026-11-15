@@ -124,3 +124,22 @@ async fn a_web_session_can_open_the_kiosk_page() {
     app.login().await;
     assert_eq!(app.get("/kiosk").await.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn only_the_kiosk_page_is_frameable() {
+    let (mut app, _id, clear) = kiosk_app().await;
+    app.get(&format!("/kiosk?token={clear}")).await;
+    let csp = app
+        .get("/kiosk")
+        .await
+        .header("content-security-policy")
+        .unwrap()
+        .to_string();
+    assert!(csp.contains("frame-ancestors *;"), "{csp}");
+    let r = app.get("/healthz").await;
+    assert!(
+        r.header("content-security-policy")
+            .unwrap()
+            .contains("frame-ancestors 'none'")
+    );
+}

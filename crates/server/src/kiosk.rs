@@ -1,7 +1,7 @@
 //! Kiosk sessions (§9): a read-only tablet session opened with a kiosk link token.
 
 use axum::http::HeaderMap;
-use axum_extra::extract::cookie::{Cookie, PrivateCookieJar};
+use axum_extra::extract::cookie::{Cookie, PrivateCookieJar, SameSite};
 
 use crate::session::{Principal, build_cookie};
 use crate::state::AppState;
@@ -10,8 +10,15 @@ pub const KIOSK_COOKIE: &str = "annee_kiosk";
 const KIOSK_DAYS: i64 = 400;
 
 /// The cookie that binds a browser to a kiosk token id (revoking the token ends the session).
+///
+/// The kiosk may be embedded in any site (e.g. Home Assistant), so over HTTPS the cookie is
+/// `SameSite=None; Secure`; otherwise browsers drop it in a cross-site iframe.
 pub fn kiosk_cookie(state: &AppState, token_id: &str) -> Cookie<'static> {
-    build_cookie(state, KIOSK_COOKIE, token_id.to_string(), KIOSK_DAYS)
+    let mut c = build_cookie(state, KIOSK_COOKIE, token_id.to_string(), KIOSK_DAYS);
+    if state.config.secure_cookies() {
+        c.set_same_site(SameSite::None);
+    }
+    c
 }
 
 /// A kiosk principal if the request carries a kiosk cookie whose token is still active.

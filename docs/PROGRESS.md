@@ -92,3 +92,8 @@
 
 All milestones M1–M10 are implemented. Not verifiable here: CI on a GitHub remote, and anything
 needing real Google credentials (see `docs/SETUP.md`).
+
+## Follow-up: kiosk iframe + mobile header
+
+- `/kiosk` can be embedded in any site (Home Assistant iframe); documented in SETUP.md.
+- Mobile (<= 760px): legend, member filter and actions collapse behind a "Filtres et menu" toggle.

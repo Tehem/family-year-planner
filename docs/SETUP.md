@@ -282,6 +282,17 @@ You can revoke any token or OAuth connection at any time in **Réglages**.
 3. Lock the tablet on that page: on Android, a kiosk browser app or screen pinning; on iPad,
    Guided Access (Settings → Accessibility). Keep the tablet plugged in.
 
+### Embed the kiosk in Home Assistant (iframe)
+
+`/kiosk` can be embedded in any site. In HA, add an iframe (webpage) card with the kiosk link from
+Réglages (`https://…/kiosk?token=fy_pat_…`); the token is exchanged for a cookie on first load.
+Kiosk links are created by an admin and can be revoked at any time in Réglages.
+
+- Over HTTPS the kiosk cookie is `SameSite=None; Secure` so it works in a cross-site iframe.
+- Browsers that block third-party cookies (Safari, iOS companion app) will not keep the session:
+  serve HA and the app under the same parent domain (e.g. `ha.example.com`, `annee.example.com`).
+- An HA served over plain `http://` can embed an `https://` app, not the other way round.
+
 ## Categories and colors
 
 Réglages → **Catégories** renames the categories (French and English) and chooses the Google

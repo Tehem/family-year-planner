@@ -77,6 +77,15 @@ fn no_store(mut res: Response) -> Response {
     res
 }
 
+/// `/kiosk` may be embedded anywhere (e.g. Home Assistant): a kiosk link is admin-issued and revocable.
+fn allow_framing(mut res: Response) -> Response {
+    let csp = crate::security::CSP.replace("frame-ancestors 'none'", "frame-ancestors *");
+    if let Ok(v) = csp.parse() {
+        res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, v);
+    }
+    res
+}
+
 async fn index(State(s): State<AppState>, headers: HeaderMap) -> Response {
     // The main screen needs a web session (a kiosk session is for /kiosk only).
     match principal_from_headers(&s, &headers).await {
@@ -125,7 +134,7 @@ async fn kiosk(
         };
     }
     match principal_from_headers(&s, &headers).await {
-        Some(_) => no_store(web::serve("kiosk.html")),
+        Some(_) => allow_framing(no_store(web::serve("kiosk.html"))),
         None => login_redirect("/kiosk"),
     }
 }
